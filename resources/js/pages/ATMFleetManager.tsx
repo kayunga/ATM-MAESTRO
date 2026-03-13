@@ -40,7 +40,7 @@ async function exportMaintenancePDF(
   if (records.length === 0) { toast("No records to export", "warning"); return; }
   try {
     const JsPDF = await loadJsPDF();
-    const doc = new JsPDF({ orientation: "Portrait", unit: "mm", format: "a4" });
+    const doc = new JsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
     const cQ = qtr(today), cY = today.getFullYear();
     const now = new Date().toLocaleString("en-GB");
 
