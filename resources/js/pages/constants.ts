@@ -29,8 +29,8 @@ export const C = {
 // ─── ATM / Domain Constants ───────────────────────────────────────────────────
 
 export const NCR_MODELS = [
-  "NCR 6622","NCR 6626","NCR 6625","NCR 6627","NCR 6632","NCR 6634",
-  "NCR 6684","NCR SelfServ 80","NCR SelfServ 84","NCR SelfServ 87"
+  "NCR 6622", "NCR 6626", "NCR 6627", "NCR 6634",
+  "NCR 6638", "NCR 6684", "NCR SelfServ 80", "NCR SelfServ 84", "NCR SelfServ 87",
 ];
 
 export const STATUSES = ["Active", "Offline", "Under Maintenance", "Decommissioned"];
@@ -43,10 +43,10 @@ export const MAINT_TYPES = [
 export const MAINT_STATUS = ["Scheduled", "In Progress", "Completed", "Cancelled"];
 
 export const ZAMBIA_BANKS = [
-  "Zanaco","Ecobank", "Stanbic Bank", "Standard Chartered Bank",
-  "FNB Zambia", "Absa Bank", "Access Bank","First Capital Bank",
-  "Citibank", "Bank of China", "Indo Zambia Bank",
-  "Madison Finance", "United Bank for Africa",
+  "Zanaco", "Stanbic Bank Zambia", "Standard Chartered Zambia",
+  "FNB Zambia", "Absa Bank Zambia", "Access Bank Zambia",
+  "Atlas Mara Zambia", "Citibank Zambia", "Bank of China Zambia",
+  "Indo Zambia Bank", "Madison Finance", "United Bank for Africa Zambia",
 ];
 
 // ─── Bank Colour Palette ──────────────────────────────────────────────────────

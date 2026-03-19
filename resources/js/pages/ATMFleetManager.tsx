@@ -1,6 +1,6 @@
 // @ts-nocheck
 /* eslint-disable */
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { router, usePage } from "@inertiajs/react";
 
 // ── Modules ──────────────────────────────────────────────────────────────────
@@ -9,6 +9,8 @@ import { fmt, fmtISO, today, qtr, statusColor, statusBg, mColor, mBg, normAtm, n
 import { useToast, usePagination } from "./hooks";
 import { Badge, Btn, Input, Modal, Card, StatCard, EmptyState, Confirm, Checkbox, Paginator, BulkBar } from "./components/ui";
 import type { PageProps } from "./types";
+import "./atm-fleet.css";
+import JobCardsModule from "./JobCardsModule";
 
 // ─── PDF Export ───────────────────────────────────────────────────────────────
 // Uses jsPDF + jspdf-autotable loaded from CDN via a one-time dynamic import.
@@ -998,108 +1000,89 @@ export default function App(props: PageProps) {
     }});
   }, [toast]);
 
-  const navItems=[{id:"dashboard",label:"Dashboard",icon:"◈"},{id:"banks",label:"Banks",icon:"🏦"},{id:"atms",label:"ATM Fleet",icon:"🏧"},{id:"maintenance",label:"Maintenance",icon:"🔧"},{id:"engineers",label:"Engineers",icon:"👷"}];
+  const navItems=[{id:"dashboard",label:"Dashboard",icon:"◈"},{id:"banks",label:"Banks",icon:"🏦"},{id:"atms",label:"ATM Fleet",icon:"🏧"},{id:"maintenance",label:"Maintenance",icon:"🔧"},{id:"engineers",label:"Engineers",icon:"👷"},{id:"jobcards",label:"Job Cards",icon:"📋"}];
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const navigate = (id) => { setPage(id); setDrawerOpen(false); };
 
+  // Auth user from Inertia shared props
+  const { auth } = usePage().props as any;
+  const authUser  = auth?.user;
+  const initials  = authUser?.name?.split(" ").map(n=>n[0]).join("").slice(0,2) ?? "A";
+  const handleLogout = () => router.post("/logout");
+
   return (
-    <div style={{minHeight:"100vh",background:C.bg,fontFamily:"'DM Sans','Outfit',system-ui,sans-serif",color:C.text}}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
-        *{box-sizing:border-box;}
-        ::-webkit-scrollbar{width:6px;height:6px;}
-        ::-webkit-scrollbar-track{background:${C.surface};}
-        ::-webkit-scrollbar-thumb{background:${C.borderHover};border-radius:4px;}
-        input:focus,select:focus,textarea:focus{border-color:${C.accent}!important;box-shadow:0 0 0 3px ${C.accentLight};}
-        button:hover:not(:disabled){filter:brightness(0.94);}
-        .card{transition:all .22s cubic-bezier(.4,0,.2,1);}
-        .card-hover{transition:all .22s cubic-bezier(.4,0,.2,1);cursor:pointer;}
-        .card-hover:hover{transform:translateY(-3px);box-shadow:0 10px 28px rgba(0,0,0,.11),0 2px 8px rgba(0,0,0,.06)!important;border-color:${C.borderHover}!important;}
-        .card-hover:active{transform:translateY(-1px);}
-        .stat-card{transition:all .22s cubic-bezier(.4,0,.2,1);}
-        .stat-card:hover{transform:translateY(-4px) scale(1.02);box-shadow:0 14px 32px rgba(0,0,0,.12),0 2px 8px rgba(0,0,0,.06)!important;border-color:${C.accent}44!important;z-index:2;}
-        .stat-card:hover .stat-card-value{transform:scale(1.08);transform-origin:left center;}
-        .stat-card:hover .stat-card-icon{opacity:0.45!important;transform:scale(1.3) rotate(-8deg)!important;}
-        .stat-card-shine{position:absolute;inset:0;background:linear-gradient(135deg,rgba(255,255,255,0) 40%,rgba(255,255,255,0.55) 50%,rgba(255,255,255,0) 60%);background-size:200% 200%;background-position:200% 0;border-radius:12px;pointer-events:none;transition:background-position .6s ease;}
-        .stat-card:hover .stat-card-shine{background-position:-100% 0;}
-        .bank-card,.eng-card{transition:all .22s cubic-bezier(.4,0,.2,1)!important;}
-        .bank-card:hover,.eng-card:hover{transform:translateY(-3px);box-shadow:0 12px 28px rgba(0,0,0,.10),0 2px 6px rgba(0,0,0,.05)!important;border-color:${C.borderHover}!important;}
-        .bank-card:hover .bank-color-strip{height:7px!important;}
-        .data-row{transition:background .12s ease,box-shadow .12s ease;position:relative;}
-        .data-row:hover{background:linear-gradient(90deg,${C.accentLight}55 0%,${C.surface} 100%)!important;box-shadow:inset 3px 0 0 ${C.accent};}
-        .data-row:hover td:first-child{padding-left:19px!important;}
-        .maint-row{transition:background .12s ease,box-shadow .12s ease;}
-        .maint-row:hover{background:${C.surface}!important;box-shadow:inset 3px 0 0 ${C.amber};}
-        .pm-due-row{transition:background .15s,transform .15s;}
-        .pm-due-row:hover{background:${C.accentLight}44!important;transform:translateX(3px);}
-        @media(max-width:768px){
-          .desktop-nav{display:none!important;}
-          .mobile-topbar{display:flex!important;}
-          .mobile-bottom-nav{display:flex!important;}
-          .main-content{padding:16px 14px 90px!important;}
-          .stat-card:hover{transform:none;}
-          .card-hover:hover{transform:none;}
-          .bank-card:hover,.eng-card:hover{transform:none;}
-        }
-        @media(min-width:769px){
-          .mobile-topbar{display:none!important;}
-          .mobile-bottom-nav{display:none!important;}
-          .drawer-overlay{display:none!important;}
-          .side-drawer{display:none!important;}
-        }
-      `}</style>
+    <div className="atm-app" style={{background:C.bg,color:C.text}}>
 
       {/* ── DESKTOP NAV ── */}
-      <nav className="desktop-nav" style={{background:C.navBg,borderBottom:`1px solid ${C.navBorder}`,position:"sticky",top:0,zIndex:100}}>
-        <div style={{maxWidth:1340,margin:"0 auto",padding:"0 24px",display:"flex",alignItems:"center",gap:24}}>
-          <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 0",marginRight:8}}>
-            <div style={{width:32,height:32,borderRadius:8,background:C.accent,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🏧</div>
-            <div><div style={{fontSize:14,fontWeight:800,color:C.text,lineHeight:1.1}}>NCR Fleet</div><div style={{fontSize:10,color:C.textMuted,fontWeight:500,letterSpacing:"0.05em"}}>ATM MANAGER</div></div>
+      <nav className="desktop-nav" style={{background:C.navBg}}>
+        <div className="desktop-nav__inner">
+          <div className="nav-logo">
+            <div className="nav-logo__icon" style={{background:C.accent}}>🏧</div>
+            <div><div className="nav-logo__name" style={{color:C.text}}>NCR Fleet</div><div className="nav-logo__sub" style={{color:C.textMuted}}>ATM MANAGER</div></div>
           </div>
-          <div style={{display:"flex",gap:2,flex:1}}>
+          <div className="nav-links">
             {navItems.map(n=>(
-              <button key={n.id} onClick={()=>setPage(n.id)} style={{display:"flex",alignItems:"center",gap:7,padding:"10px 14px",borderRadius:8,border:"none",background:page===n.id?"#fff":"transparent",cursor:"pointer",fontSize:14,fontWeight:page===n.id?700:500,color:page===n.id?C.accent:C.textMid,fontFamily:"inherit",boxShadow:page===n.id?C.shadow:"none",transition:"all .15s"}}>
-                <span style={{fontSize:15}}>{n.icon}</span>{n.label}
+              <button key={n.id} onClick={()=>setPage(n.id)} className="nav-link"
+                style={{background:page===n.id?"#fff":"transparent",fontWeight:page===n.id?700:500,color:page===n.id?C.accent:C.textMid,boxShadow:page===n.id?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
+                <span className="nav-link__icon">{n.icon}</span>{n.label}
               </button>
             ))}
           </div>
           <Btn small variant="teal" onClick={()=>setBulkModal({type:"bulkPM",atms:[]})}>⚡ Bulk PM</Btn>
-          <Btn small variant="secondary" onClick={handleExportPDF}>📄 Export</Btn>
-          <div style={{display:"flex",gap:8}}>
-            <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:20,padding:"4px 12px",fontSize:13,fontWeight:600,color:C.purple}}>🏦 {banks.length}</div>
-            <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:20,padding:"4px 12px",fontSize:13,fontWeight:600,color:C.textMid}}>🏧 {atms.length}</div>
+          <div className="nav-chips">
+            <div className="nav-chip" style={{color:C.purple}}>🏦 {banks.length}</div>
+            <div className="nav-chip" style={{color:C.textMid}}>🏧 {atms.length}</div>
+          </div>
+          {/* ── Profile dropdown ── */}
+          <div style={{position:"relative"}}>
+            <button onClick={()=>setProfileOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:8,background:"none",border:`1px solid ${C.border}`,borderRadius:20,padding:"5px 12px 5px 6px",cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}>
+              <div style={{width:28,height:28,borderRadius:14,background:C.accentLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,color:C.accent}}>{initials}</div>
+              <span style={{fontSize:13,fontWeight:600,color:C.textMid,maxWidth:100,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{authUser?.name ?? "Admin"}</span>
+              <span style={{fontSize:10,color:C.textMuted}}>{profileOpen?"▲":"▼"}</span>
+            </button>
+            {profileOpen&&(
+              <div onClick={()=>setProfileOpen(false)} style={{position:"absolute",top:"calc(100% + 8px)",right:0,background:"#fff",border:`1px solid ${C.border}`,borderRadius:14,boxShadow:"0 8px 24px rgba(0,0,0,.10)",minWidth:200,zIndex:500,overflow:"hidden"}}>
+                <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`,background:C.surface}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.text}}>{authUser?.name ?? "Admin"}</div>
+                  <div style={{fontSize:12,color:C.textMuted,marginTop:2}}>{authUser?.email ?? ""}</div>
+                </div>
+                <div style={{padding:8}}>
+                  <button onClick={handleLogout} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:8,border:"none",background:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:C.danger}}>
+                    <span>🚪</span> Sign Out
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </nav>
 
       {/* ── MOBILE TOP BAR ── */}
-      <div className="mobile-topbar" style={{display:"none",position:"sticky",top:0,zIndex:200,background:C.navBg,borderBottom:`1px solid ${C.navBorder}`,padding:"0 16px",height:56,alignItems:"center",justifyContent:"space-between"}}>
-        <button onClick={()=>setDrawerOpen(true)} style={{background:"none",border:"none",cursor:"pointer",padding:6,borderRadius:8,display:"flex",flexDirection:"column",gap:5,alignItems:"center",justifyContent:"center"}}>
-          <span style={{display:"block",width:22,height:2,background:C.text,borderRadius:2}}/>
-          <span style={{display:"block",width:22,height:2,background:C.text,borderRadius:2}}/>
-          <span style={{display:"block",width:22,height:2,background:C.text,borderRadius:2}}/>
+      <div className="mobile-topbar" style={{background:C.navBg}}>
+        <button onClick={()=>setDrawerOpen(true)} className="hamburger">
+          <span className="hamburger__bar" style={{background:C.text}}/>
+          <span className="hamburger__bar" style={{background:C.text}}/>
+          <span className="hamburger__bar" style={{background:C.text}}/>
         </button>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <div style={{width:28,height:28,borderRadius:7,background:C.accent,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🏧</div>
-          <div style={{fontSize:14,fontWeight:800,color:C.text}}>NCR Fleet</div>
+        <div className="mobile-topbar__logo">
+          <div className="mobile-topbar__icon" style={{background:C.accent}}>🏧</div>
+          <div className="mobile-topbar__title" style={{color:C.text}}>NCR Fleet</div>
         </div>
-        <div style={{display:"flex",gap:6}}>
-          <button onClick={()=>setBulkModal({type:"bulkPM",atms:[]})} style={{background:C.tealLight,border:`1px solid ${C.teal}44`,borderRadius:8,padding:"6px 10px",fontSize:12,fontWeight:700,color:C.teal,cursor:"pointer",fontFamily:"inherit"}}>⚡ PM</button>
-          <button onClick={handleExportPDF} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 10px",fontSize:12,fontWeight:700,color:C.textMid,cursor:"pointer",fontFamily:"inherit"}}>📄</button>
-        </div>
+        <button onClick={()=>setBulkModal({type:"bulkPM",atms:[]})} style={{background:C.tealLight,border:`1px solid ${C.teal}44`,borderRadius:8,padding:"6px 10px",fontSize:12,fontWeight:700,color:C.teal,cursor:"pointer",fontFamily:"inherit"}}>⚡ PM</button>
       </div>
 
       {/* ── MOBILE DRAWER ── */}
-      {drawerOpen&&<div className="drawer-overlay" onClick={()=>setDrawerOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:300,backdropFilter:"blur(2px)"}}/>}
-      <div className="side-drawer" style={{position:"fixed",top:0,left:0,bottom:0,width:280,background:"#fff",zIndex:400,boxShadow:"4px 0 24px rgba(0,0,0,.15)",transform:drawerOpen?"translateX(0)":"translateX(-100%)",transition:"transform .28s cubic-bezier(.4,0,.2,1)",display:"flex",flexDirection:"column",overflowY:"auto"}}>
-        <div style={{padding:"20px 20px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",background:C.navBg}}>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{width:36,height:36,borderRadius:9,background:C.accent,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🏧</div>
-            <div><div style={{fontSize:15,fontWeight:800,color:C.text,lineHeight:1.1}}>NCR Fleet</div><div style={{fontSize:10,color:C.textMuted,fontWeight:500,letterSpacing:"0.06em",textTransform:"uppercase"}}>ATM Manager</div></div>
+      {drawerOpen&&<div className="drawer-overlay" onClick={()=>setDrawerOpen(false)}/>}
+      <div className="side-drawer" style={{transform:drawerOpen?"translateX(0)":"translateX(-100%)"}}>
+        <div className="drawer-header" style={{background:C.navBg}}>
+          <div className="drawer-logo">
+            <div className="drawer-logo__icon" style={{background:C.accent}}>🏧</div>
+            <div><div className="drawer-logo__name" style={{color:C.text}}>NCR Fleet</div><div className="drawer-logo__sub" style={{color:C.textMuted}}>ATM Manager</div></div>
           </div>
-          <button onClick={()=>setDrawerOpen(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:C.textMuted,padding:4,borderRadius:6,lineHeight:1}}>×</button>
+          <button onClick={()=>setDrawerOpen(false)} className="drawer-close" style={{color:C.textMuted}}>×</button>
         </div>
-        <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",gap:8}}>
+        <div className="drawer-stats">
           {[[banks.length,"Banks",C.purple,C.purpleLight],[atms.length,"ATMs",C.accent,C.accentLight],[atms.filter(a=>a.status==="Active").length,"Active",C.green,C.greenLight]].map(([v,l,c,bg])=>(
             <div key={l} style={{flex:1,background:bg,borderRadius:10,padding:"10px 12px",textAlign:"center"}}>
               <div style={{fontSize:20,fontWeight:800,color:c}}>{v}</div>
@@ -1107,8 +1090,8 @@ export default function App(props: PageProps) {
             </div>
           ))}
         </div>
-        <nav style={{padding:"10px 12px",flex:1}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.textMuted,letterSpacing:"0.08em",textTransform:"uppercase",padding:"8px 8px 6px"}}>Navigation</div>
+        <nav className="drawer-nav">
+          <div className="drawer-nav__label" style={{color:C.textMuted}}>Navigation</div>
           {navItems.map(n=>{const active=page===n.id;return(
             <button key={n.id} onClick={()=>navigate(n.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"12px 12px",borderRadius:10,border:"none",background:active?C.accentLight:"transparent",cursor:"pointer",fontFamily:"inherit",marginBottom:2,transition:"all .15s",textAlign:"left"}}>
               <span style={{fontSize:20,width:28,textAlign:"center",lineHeight:1}}>{n.icon}</span>
@@ -1116,23 +1099,29 @@ export default function App(props: PageProps) {
               {active&&<span style={{marginLeft:"auto",width:6,height:6,borderRadius:3,background:C.accent}}/>}
             </button>
           );})}
-          <div style={{height:1,background:C.border,margin:"12px 8px"}}/>
+          <div className="drawer-divider"/>
           <button onClick={()=>{setDrawerOpen(false);setBulkModal({type:"bulkPM",atms:[]});}} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"12px 12px",borderRadius:10,border:`1.5px solid ${C.teal}44`,background:C.tealLight,cursor:"pointer",fontFamily:"inherit",marginBottom:6}}>
             <span style={{fontSize:20,width:28,textAlign:"center"}}>⚡</span>
             <div><div style={{fontSize:14,fontWeight:700,color:C.teal}}>Bulk PM Log</div><div style={{fontSize:11,color:C.teal+"99",marginTop:1}}>Log PM for multiple ATMs</div></div>
           </button>
-          <button onClick={()=>{setDrawerOpen(false);handleExportPDF();}} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"12px 12px",borderRadius:10,border:`1.5px solid ${C.border}`,background:C.surface,cursor:"pointer",fontFamily:"inherit",marginBottom:6}}>
-            <span style={{fontSize:20,width:28,textAlign:"center"}}>📄</span>
-            <div><div style={{fontSize:14,fontWeight:700,color:C.text}}>Export Report</div><div style={{fontSize:11,color:C.textMuted,marginTop:1}}>PDF · respects current filters</div></div>
-          </button>
         </nav>
         <div style={{padding:"14px 16px",borderTop:`1px solid ${C.border}`,background:C.surface}}>
-          <div style={{fontSize:11,color:C.textMuted,textAlign:"center"}}>NCR Fleet ATM Manager · Zambia</div>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+            <div style={{width:32,height:32,borderRadius:16,background:C.accentLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,color:C.accent}}>{initials}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{authUser?.name??"Admin"}</div>
+              <div style={{fontSize:11,color:C.textMuted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{authUser?.email??""}</div>
+            </div>
+          </div>
+          <button onClick={handleLogout} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"9px 14px",borderRadius:10,border:`1px solid ${C.border}`,background:"#fff",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:C.danger}}>
+            🚪 Sign Out
+          </button>
+          <div style={{fontSize:11,color:C.textMuted,textAlign:"center",marginTop:10}}>NCR Fleet · Techmasters Zambia</div>
         </div>
       </div>
 
       {/* ── MAIN CONTENT ── */}
-      <main className="main-content" style={{maxWidth:1340,margin:"0 auto",padding:"28px 24px"}}>
+      <main className="main-content">
         {page==="dashboard"   &&<Dashboard   atms={atms} maintenance={maintenance} engineers={engineers} banks={banks} onBulkPM={()=>setBulkModal({type:"bulkPM",atms:[]})} pmBannerDismissed={pmBannerDismissed} onDismissPMBanner={()=>{ setPmBannerDismissed(true); toast("PM reminder dismissed","info"); }}/>}
         {page==="banks"       &&<BanksModule banks={banks} atms={atms} onAdd={()=>setModal({type:"bank"})} onEdit={b=>setModal({type:"bank",data:b})} onDelete={deleteBank}/>}
         {page==="atms"        &&<AtmList     atms={atms} engineers={engineers} banks={banks} maintenance={maintenance}
@@ -1147,10 +1136,11 @@ export default function App(props: PageProps) {
             onFilteredChange={(records,meta)=>setExportableMaint({records,meta})}
             onExport={handleExportPDF}/>}
         {page==="engineers"   &&<EngineersModule   engineers={engineers} atms={atms} banks={banks} onAdd={()=>setModal({type:"eng"})} onEdit={e=>setModal({type:"eng",data:e})} onDelete={deleteEng}/>}
+        {page==="jobcards"    &&<JobCardsModule    atms={atms} engineers={engineers} banks={banks}/>}
       </main>
 
       {/* ── MOBILE BOTTOM NAV ── */}
-      <div className="mobile-bottom-nav" style={{display:"none",position:"fixed",bottom:0,left:0,right:0,zIndex:150,background:"#fff",borderTop:`1px solid ${C.border}`,boxShadow:"0 -4px 16px rgba(0,0,0,.08)"}}>
+      <div className="mobile-bottom-nav">
         {navItems.map(n=>{const active=page===n.id;return(
           <button key={n.id} onClick={()=>navigate(n.id)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,padding:"10px 4px 12px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"inherit",position:"relative"}}>
             {active&&<span style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:32,height:3,borderRadius:"0 0 3px 3px",background:C.accent}}/>}
@@ -1175,3 +1165,6 @@ export default function App(props: PageProps) {
     </div>
   );
 }
+
+// Bypass Inertia default layout
+App.layout = (page) => page;

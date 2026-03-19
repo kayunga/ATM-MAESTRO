@@ -6,33 +6,59 @@ use App\Http\Controllers\AtmController;
 use App\Http\Controllers\BankController;
 use App\Http\Controllers\EngineerController;
 use App\Http\Controllers\MaintenanceController;
+use App\Http\Controllers\EngineerPortalController;
+use App\Http\Controllers\JobCardDownloadController;
+use App\Http\Controllers\Api\JobCardController;
 
-// ── Main SPA entry point ──────────────────────────────────────────────────────
-// This is the only GET route — Inertia renders the React app with all data.
-// Route::get('/', [AtmFleetController::class, 'index'])->name('index');
-Route::get('/', [AtmFleetController::class, 'index'])->name('atm.fleet');
+// ── Auth ──────────────────────────────────────────────────────────────────────
+// One login page for everyone. After login, the controller decides where to send
+// the user based on whether they have an admin role or an engineer profile.
+Route::middleware('guest')->group(function () {
+    Route::get ('/login', fn() => inertia('auth/login'))->name('login');
+    Route::post('/login', [EngineerPortalController::class, 'login'])->name('login.store');
+});
+Route::middleware('auth')->post('/logout', [EngineerPortalController::class, 'logout'])->name('logout');
 
-// ── Banks ─────────────────────────────────────────────────────────────────────
-Route::post('/banks',           [BankController::class, 'store']);
-Route::put('/banks/{bank}',     [BankController::class, 'update']);
-Route::delete('/banks/{bank}',  [BankController::class, 'destroy']);
+// ── Admin SPA ─────────────────────────────────────────────────────────────────
+Route::middleware(['auth', 'admin'])->group(function () {
+    Route::get('/', [AtmFleetController::class, 'index'])->name('atm.fleet');
 
-// ── ATMs ──────────────────────────────────────────────────────────────────────
-Route::post('/atms',                [AtmController::class, 'store']);
-Route::put('/atms/{atm}',          [AtmController::class, 'update']);
-Route::delete('/atms/{atm}',       [AtmController::class, 'destroy']);
-// Bulk operations — must be defined BEFORE the {atm} param route
-Route::post('/atms/bulk-status',   [AtmController::class, 'bulkStatus']);
-Route::post('/atms/bulk-reassign', [AtmController::class, 'bulkReassign']);
-Route::post('/atms/bulk-delete',   [AtmController::class, 'bulkDelete']);
+    Route::post('/banks',          [BankController::class, 'store']);
+    Route::put('/banks/{bank}',    [BankController::class, 'update']);
+    Route::delete('/banks/{bank}', [BankController::class, 'destroy']);
 
-// ── Maintenance ───────────────────────────────────────────────────────────────
-Route::post('/maintenance/bulk',            [MaintenanceController::class, 'bulkStore']);  // before {maintenance}
-Route::post('/maintenance',                 [MaintenanceController::class, 'store']);
-Route::put('/maintenance/{maintenance}',    [MaintenanceController::class, 'update']);
-Route::delete('/maintenance/{maintenance}', [MaintenanceController::class, 'destroy']);
+    Route::post('/atms/bulk-status',   [AtmController::class, 'bulkStatus']);
+    Route::post('/atms/bulk-reassign', [AtmController::class, 'bulkReassign']);
+    Route::post('/atms/bulk-delete',   [AtmController::class, 'bulkDelete']);
+    Route::post('/atms',               [AtmController::class, 'store']);
+    Route::put('/atms/{atm}',          [AtmController::class, 'update']);
+    Route::delete('/atms/{atm}',       [AtmController::class, 'destroy']);
 
-// ── Engineers ─────────────────────────────────────────────────────────────────
-Route::post('/engineers',               [EngineerController::class, 'store']);
-Route::put('/engineers/{engineer}',     [EngineerController::class, 'update']);
-Route::delete('/engineers/{engineer}',  [EngineerController::class, 'destroy']);
+    Route::post('/maintenance/bulk',            [MaintenanceController::class, 'bulkStore']);
+    Route::post('/maintenance',                 [MaintenanceController::class, 'store']);
+    Route::put('/maintenance/{maintenance}',    [MaintenanceController::class, 'update']);
+    Route::delete('/maintenance/{maintenance}', [MaintenanceController::class, 'destroy']);
+
+    Route::post('/engineers',              [EngineerController::class, 'store']);
+    Route::put('/engineers/{engineer}',    [EngineerController::class, 'update']);
+    Route::delete('/engineers/{engineer}', [EngineerController::class, 'destroy']);
+
+    Route::get ('/job-cards/data',               [JobCardController::class, 'adminIndex']);
+    Route::post('/job-cards/{jobCard}/approve',  [JobCardController::class, 'approve']);
+    Route::post('/job-cards/{jobCard}/reject',   [JobCardController::class, 'reject']);
+    Route::post('/job-cards/bulk-download',      [JobCardDownloadController::class, 'bulk'])->name('job-cards.bulk-download');
+});
+
+// ── Shared download route (admin + elevated engineers) ────────────────────────
+Route::middleware('auth')->get(
+    '/job-cards/{jobCard}/files/{index}',
+    [JobCardDownloadController::class, 'singleFile']
+)->name('job-cards.file');
+
+// ── Engineer Portal ───────────────────────────────────────────────────────────
+Route::middleware('auth')->group(function () {
+    Route::get('/engineer', [EngineerPortalController::class, 'index'])->name('engineer.portal');
+    Route::post('/engineer/job-cards',                  [EngineerPortalController::class, 'storeJobCard'])->name('engineer.job-cards.store');
+    Route::post('/engineer/job-cards/{jobCard}/submit', [EngineerPortalController::class, 'submitJobCard'])->name('engineer.job-cards.submit');
+    Route::delete('/engineer/job-cards/{jobCard}',      [EngineerPortalController::class, 'destroyJobCard'])->name('engineer.job-cards.destroy');
+});

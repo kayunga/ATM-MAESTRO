@@ -1,37 +1,20 @@
 <?php
-// app/Models/Engineer.php
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Engineer extends Model
 {
-    use HasFactory, SoftDeletes;
+    use SoftDeletes;
 
-    protected $fillable = [
-        'name',
-        'phone',
-        'email',
-        'region',
-    ];
+    protected $fillable = ['user_id', 'name', 'phone', 'email', 'region'];
 
-    // ── Relationships ──────────────────────────────────────────────────────
-    public function atms()
-    {
-        return $this->hasMany(Atm::class);
-    }
-
-    public function maintenanceRecords()
-    {
-        return $this->hasMany(MaintenanceRecord::class);
-    }
-
-    // ── Accessors ──────────────────────────────────────────────────────────
-    public function getAtmCountAttribute(): int
-    {
-        return $this->atms()->count();
-    }
+    public function user(): BelongsTo               { return $this->belongsTo(User::class); }
+    public function atms(): HasMany                  { return $this->hasMany(Atm::class); }
+    public function jobCards(): HasMany              { return $this->hasMany(JobCard::class); }
+    public function maintenanceRecords(): HasMany    { return $this->hasMany(MaintenanceRecord::class); }
 }

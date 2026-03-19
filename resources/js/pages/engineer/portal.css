@@ -1,0 +1,12 @@
+/* Engineer Portal — responsive nav styles */
+.eng-desktop-nav { display: flex; flex-direction: column; }
+.eng-bottom-nav  { display: none; }
+.eng-hamburger   { display: none; }
+.eng-content     { padding-bottom: 0; }
+
+@media (max-width: 768px) {
+  .eng-desktop-nav { display: none; }
+  .eng-bottom-nav  { display: flex; }
+  .eng-hamburger   { display: flex; align-items: center; justify-content: space-between; }
+  .eng-content     { padding-bottom: 72px; }
+}
