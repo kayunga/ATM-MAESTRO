@@ -11,12 +11,11 @@ class JobCard extends Model
     use SoftDeletes;
 
     protected $fillable = [
-        'atm_id', 'engineer_id', 'reviewed_by',
-        'attachments',
-        'type', 'work_description', 'parts_used', 'hours_spent',
-        'scheduled_date', 'completed_date', 'quarter', 'year',
-        'status', 'rejection_reason', 'photos', 'notes',
-        'submitted_at', 'reviewed_at',
+        'atm_id', 'engineer_id', 'reviewed_by', 'call_id',
+        'attachments', 'type', 'work_description', 'parts_used',
+        'hours_spent', 'scheduled_date', 'completed_date',
+        'quarter', 'year', 'status', 'rejection_reason',
+        'photos', 'notes', 'submitted_at', 'reviewed_at',
     ];
 
     protected $casts = [
@@ -32,7 +31,8 @@ class JobCard extends Model
     public function atm(): BelongsTo      { return $this->belongsTo(Atm::class); }
     public function engineer(): BelongsTo { return $this->belongsTo(Engineer::class); }
     public function reviewer(): BelongsTo { return $this->belongsTo(User::class, 'reviewed_by'); }
+    public function call(): BelongsTo     { return $this->belongsTo(Call::class); }
 
-    public function scopePending($query)       { return $query->where('status', 'submitted'); }
-    public function scopeForEngineer($query, int $id) { return $query->where('engineer_id', $id); }
+    public function scopePending($query)             { return $query->where('status', 'submitted'); }
+    public function scopeForEngineer($query, int $id){ return $query->where('engineer_id', $id); }
 }

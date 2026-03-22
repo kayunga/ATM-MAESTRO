@@ -17,6 +17,10 @@ return new class extends Migration
             $table->string('model', 60); // e.g. NCR 6684, NCR 6627
             $table->string('location');           // Branch / site name
             $table->string('address')->nullable(); // Full address
+            $table->foreignId('bank_id')
+                  ->nullable()
+                  ->constrained('banks')
+                  ->nullOnDelete();
             $table->foreignId('engineer_id')
                   ->nullable()
                   ->constrained('engineers')
@@ -30,6 +34,7 @@ return new class extends Migration
 
             $table->index('status');
             $table->index('engineer_id');
+            $table->index('bank_id');
         });
     }
 

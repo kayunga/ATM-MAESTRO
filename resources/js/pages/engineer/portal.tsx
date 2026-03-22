@@ -17,6 +17,15 @@ interface JobCard   {
   attachments:Attachment[]; submitted_at?:string; reviewed_at?:string; created_at:string;
   atm:Atm; reviewer?:{name:string};
 }
+interface EngCall   {
+  id:number; call_type:"new"|"old"|"repeat";
+  status:"pending"|"assigned"|"on_hold"|"escalated"|"resolved";
+  priority:"low"|"medium"|"high"; fault_description:string;
+  resolution_notes?:string; assigned_at?:string; created_at:string;
+  sla_breach_at?:string; sla_status:"active"|"breached"|"met"|"none";
+  sla_minutes?:number; sla_hours_allowed?:number;
+  job_cards_count:number; is_mine:boolean; atm:Atm; engineer?:{id:number;name:string};
+}
 interface PMRecord  {
   id:number; atm_id:number; type:string; status:string;
   scheduled_date:string; completed_date?:string; quarter:number; year:number;
@@ -782,8 +791,492 @@ const TABS = [
   {id:"pm",      icon:"📋", label:"PM"      },
   {id:"log",     icon:"✏️", label:"Log Card"},
   {id:"cards",   icon:"🗂", label:"Job Cards"},
-  {id:"profile", icon:"👤", label:"Profile" },
+  {id:"calls",   icon:"📞", label:"Calls"   },
 ];
+
+const CALL_PRIORITY:any = {
+  high:   { color:"#ef4444", bg:"#fef2f2", label:"High"   },
+  medium: { color:"#f59e0b", bg:"#fffbeb", label:"Medium" },
+  low:    { color:"#10b366", bg:"#eafaf2", label:"Low"    },
+};
+const CALL_STATUS:any = {
+  pending:   { color:"#6b7280", bg:"#f3f4f6",      label:"Pending"        },
+  assigned:  { color:"#1d6ef5", bg:"#eef3fe",      label:"Assigned"       },
+  on_hold:   { color:"#f59e0b", bg:"#fffbeb",      label:"On Hold"        },
+  escalated: { color:"#10b366", bg:"#eafaf2",      label:"Escalated→Bank" },
+  resolved:  { color:"#10b366", bg:"#eafaf2",      label:"Resolved"       },
+};
+const CALL_TYPE:any = {
+  new:    { color:"#1d6ef5", bg:"#eef3fe", label:"New"    },
+  old:    { color:"#f59e0b", bg:"#fffbeb", label:"Old"    },
+  repeat: { color:"#ef4444", bg:"#fef2f2", label:"Repeat" },
+};
+
+function slaInfo(call:any) {
+  if (!call.sla_breach_at || call.sla_status==="none") return null;
+  const m = call.sla_minutes ?? 0;
+  if (call.sla_status==="breached"||m<=0) return {text:"SLA Breached", color:"#ef4444", bg:"#fef2f2"};
+  const h = Math.floor(m/60), mins = m%60;
+  const text = h>0?`${h}h ${mins}m left`:`${mins}m left`;
+  const color = m<30?"#ef4444":m<60?"#f59e0b":"#1d6ef5";
+  const bg    = m<30?"#fef2f2":m<60?"#fffbeb":"#eef3fe";
+  return {text,color,bg};
+}
+
+function getCSRFCookie() {
+  const m = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
+  if (m) return decodeURIComponent(m[1]);
+  return (document.querySelector('meta[name="csrf-token"]') as any)?.content ?? "";
+}
+
+// ─── Close Call Form ──────────────────────────────────────────────────────────
+const CloseCallForm = ({call, atms, onClose, onSaved}:any) => {
+  // Default closed_at to current local datetime
+  const nowLocal = new Date();
+  const localIso = new Date(nowLocal.getTime() - nowLocal.getTimezoneOffset()*60000)
+    .toISOString().slice(0,16);
+
+  const [form,setForm] = useState({
+    resolution_notes:"", work_description:"", parts_used:"",
+    closed_at: localIso, notes:"",
+  });
+  const [files,setFiles2]  = useState<File[]>([]);
+  const [saving,setSaving] = useState(false);
+  const set = (k:string)=>(v:any)=>setForm(f=>({...f,[k]:v}));
+
+  const submit = async (submitNow:boolean) => {
+    if (!form.resolution_notes.trim()) { alert("Please enter resolution notes."); return; }
+    if (!form.work_description.trim()) { alert("Please describe the work performed."); return; }
+    setSaving(true);
+    const fd = new FormData();
+    Object.entries(form).forEach(([k,v])=>fd.append(k,String(v)));
+    fd.append("submit_now", submitNow?"1":"0");
+    files.forEach(f=>fd.append("files[]",f));
+    try {
+      const res = await fetch(`/engineer/calls/${call.id}/close`, {
+        method:"POST",
+        headers:{ "X-Requested-With":"XMLHttpRequest","X-XSRF-TOKEN":getCSRFCookie() },
+        credentials:"same-origin",
+        body:fd,
+      });
+      if (!res.ok) { const e=await res.json(); alert(e.message||"Failed to close call."); setSaving(false); return; }
+      onSaved();
+    } catch { alert("Network error."); setSaving(false); }
+  };
+
+  return (
+    <div style={{paddingBottom:8}}>
+      {/* Call summary */}
+      <div style={{background:CALL_PRIORITY[call.priority].bg,borderRadius:12,padding:"12px 14px",
+        marginBottom:16,borderLeft:`4px solid ${CALL_PRIORITY[call.priority].color}`}}>
+        <div style={{fontSize:14,fontWeight:700,color:CALL_PRIORITY[call.priority].color}}>
+          {call.atm.terminal_id} · {call.atm.bank.short_code}
+        </div>
+        <div style={{fontSize:13,color:C.textMid,marginTop:3}}>{call.fault_description}</div>
+      </div>
+
+      {/* Resolution notes */}
+      <div style={{marginBottom:14}}>
+        <label style={{...labelStyle}}>Resolution Notes <span style={{color:C.danger}}>*</span></label>
+        <textarea value={form.resolution_notes} onChange={e=>set("resolution_notes")(e.target.value)}
+          placeholder="Describe how the fault was resolved…" rows={3}
+          style={{...inputStyle,resize:"vertical"}}/>
+      </div>
+
+      <div style={{fontSize:13,fontWeight:700,color:C.text,margin:"16px 0 12px",
+        paddingTop:12,borderTop:`1px solid ${C.border}`}}>
+        Job Card Details
+      </div>
+
+      {/* Work description */}
+      <div style={{marginBottom:14}}>
+        <label style={{...labelStyle}}>Work Performed <span style={{color:C.danger}}>*</span></label>
+        <textarea value={form.work_description} onChange={e=>set("work_description")(e.target.value)}
+          placeholder="Describe all work carried out…" rows={3}
+          style={{...inputStyle,resize:"vertical"}}/>
+      </div>
+
+      {/* Parts */}
+      <div style={{marginBottom:14}}>
+        <label style={{...labelStyle}}>Parts Used</label>
+        <textarea value={form.parts_used} onChange={e=>set("parts_used")(e.target.value)}
+          placeholder="List parts replaced…" rows={2}
+          style={{...inputStyle,resize:"vertical"}}/>
+      </div>
+
+      {/* Closed at — custom datetime */}
+      <div style={{marginBottom:14}}>
+        <label style={{...labelStyle}}>Date & Time Closed <span style={{color:C.danger}}>*</span></label>
+        <input type="datetime-local" value={form.closed_at}
+          onChange={e=>set("closed_at")(e.target.value)} style={inputStyle}/>
+        {call.sla_breach_at&&(()=>{
+          const sla = slaInfo(call);
+          return sla?(
+            <div style={{marginTop:6,background:sla.bg,borderRadius:8,padding:"6px 10px",
+              fontSize:12,fontWeight:600,color:sla.color}}>
+              ⏱ SLA: {sla.text} · Deadline: {new Date(call.sla_breach_at).toLocaleString("en-GB")}
+            </div>
+          ):null;
+        })()}
+      </div>
+
+      {/* Notes */}
+      <div style={{marginBottom:14}}>
+        <label style={{...labelStyle}}>Additional Notes</label>
+        <textarea value={form.notes} onChange={e=>set("notes")(e.target.value)}
+          placeholder="Any additional remarks…" rows={2}
+          style={{...inputStyle,resize:"vertical"}}/>
+      </div>
+
+      {/* Files */}
+      <div style={{marginBottom:20}}>
+        <label style={{...labelStyle}}>Attachments ({files.length}/10)</label>
+        <FileUpload files={files} onChange={setFiles2}/>
+      </div>
+
+      {/* Actions */}
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <Btn variant="primary" onClick={()=>submit(true)} disabled={saving} full>
+          {saving?"Saving…":"✓ Close Call & Submit Job Card"}
+        </Btn>
+        <Btn variant="ghost" onClick={()=>submit(false)} disabled={saving} full>
+          💾 Close Call & Save as Draft
+        </Btn>
+        <Btn variant="secondary" onClick={onClose} disabled={saving} full>Cancel</Btn>
+      </div>
+    </div>
+  );
+};
+
+// ─── Calls Tab ────────────────────────────────────────────────────────────────
+// ─── Inline Note Editor ──────────────────────────────────────────────────────
+const NoteEditor = ({call, onSave}:{call:any; onSave:(id:number,note:string)=>void}) => {
+  const [open,setOpen]   = useState(false);
+  const [note,setNote]   = useState(call.notes ?? "");
+  const [saving,setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    await onSave(call.id, note);
+    setSaving(false);
+    setOpen(false);
+  };
+
+  if (!open) return (
+    <button onClick={e=>{e.stopPropagation();setOpen(true);}} style={{
+      background:"none",border:"1px dashed #cbd5e1",borderRadius:7,
+      padding:"4px 10px",fontSize:11,fontWeight:600,color:"#64748b",
+      cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:4}}>
+      📝 {call.notes ? "Edit note" : "Add note"}
+    </button>
+  );
+
+  return (
+    <div onClick={e=>e.stopPropagation()}
+      style={{marginTop:8,background:"#f8fafc",borderRadius:10,padding:10,
+        border:"1px solid #e2e8f0"}}>
+      <textarea value={note} onChange={e=>setNote(e.target.value)}
+        placeholder="Enter note (e.g. reason for hold, parts pending, update for admin)…"
+        rows={3} style={{width:"100%",fontSize:12,borderRadius:8,padding:"8px 10px",
+          border:"1px solid #cbd5e1",fontFamily:"inherit",resize:"vertical",
+          outline:"none",boxSizing:"border-box"}}/>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:6}}>
+        <button onClick={()=>{setNote(call.notes??"");setOpen(false);}} style={{
+          background:"none",border:"1px solid #e2e8f0",borderRadius:7,padding:"5px 12px",
+          fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",color:"#64748b"}}>
+          Cancel
+        </button>
+        <button onClick={save} disabled={saving||!note.trim()} style={{
+          background:"#1d6ef5",color:"#fff",border:"none",borderRadius:7,
+          padding:"5px 14px",fontSize:11,fontWeight:700,cursor:"pointer",
+          fontFamily:"inherit",opacity:saving?0.6:1}}>
+          {saving?"Saving…":"Save Note"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const CallsTab = ({atms, engineer, addToast}:any) => {
+  const [calls,setCalls]   = useState<any[]>([]);
+  const [loading,setLoading] = useState(true);
+  const [filter,setFilter] = useState("open");
+  const [selected,setSelected] = useState<any>(null);
+  const [modal,setModal]   = useState<null|"detail"|"close">(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/engineer/calls",{
+        headers:{Accept:"application/json","X-Requested-With":"XMLHttpRequest"},
+        credentials:"same-origin",
+      });
+      const data = await res.json();
+      setCalls(Array.isArray(data)?data:[]);
+    } catch(e){ console.error(e); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(()=>{ load(); },[]);
+
+  const returnCall = async (call:any) => {
+    if (!confirm("Return this call to the pending pool? You will be unassigned.")) return;
+    const res = await fetch(`/engineer/calls/${call.id}/return`,{
+      method:"POST",
+      headers:{Accept:"application/json","X-Requested-With":"XMLHttpRequest","X-XSRF-TOKEN":getCSRFCookie()},
+      credentials:"same-origin",
+    });
+    if (res.ok) { addToast("Call returned to pending pool.","success"); load(); }
+    else { const e=await res.json(); addToast(e.message||"Failed.","error"); }
+  };
+
+  const saveNote = async (callId:number, notes:string) => {
+    const res = await fetch(`/engineer/calls/${callId}/note`,{
+      method:"POST",
+      headers:{Accept:"application/json","Content-Type":"application/json",
+        "X-Requested-With":"XMLHttpRequest","X-XSRF-TOKEN":getCSRFCookie()},
+      credentials:"same-origin",
+      body:JSON.stringify({notes}),
+    });
+    if (res.ok) { addToast("Note saved.","success"); load(); }
+    else { const e=await res.json(); addToast(e.message||"Failed to save note.","error"); }
+  };
+
+  const selfAssign = async (call:any) => {
+    const res = await fetch(`/engineer/calls/${call.id}/assign`,{
+      method:"POST",
+      headers:{Accept:"application/json","X-Requested-With":"XMLHttpRequest","X-XSRF-TOKEN":getCSRFCookie()},
+      credentials:"same-origin",
+    });
+    if (res.ok) { addToast("Call assigned to you.","success"); load(); }
+    else { const e=await res.json(); addToast(e.message||"Failed.","error"); }
+  };
+
+  const isClosed = (s:string) => s==="resolved" || s==="escalated";
+  const filtered = filter==="open"
+    ? calls.filter(c=>!isClosed(c.status))
+    : filter==="mine"
+    ? calls.filter(c=>c.is_mine&&!isClosed(c.status))
+    : calls.filter(c=>isClosed(c.status));
+
+  const [bannerDismissed,setBannerDismissed] = useState(false);
+  const mineCount = calls.filter(c=>c.is_mine&&!isClosed(c.status)).length;
+  const openCount = calls.filter(c=>c.status!=="resolved").length;
+
+  return (
+    <div style={{padding:"16px 16px 24px"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:10}}>
+        <div>
+          <h2 style={{margin:0,fontSize:18,fontWeight:800,color:C.text}}>Calls</h2>
+          <div style={{fontSize:12,color:C.textMuted,marginTop:2}}>All open calls — you can self-assign and close</div>
+        </div>
+        <button onClick={load} style={{background:C.surface,border:`1px solid ${C.border}`,
+          borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:600,color:C.textMid,
+          cursor:"pointer",fontFamily:"inherit"}}>↻ Refresh</button>
+      </div>
+
+      {/* Mine alert — dismissible */}
+      {mineCount>0&&!bannerDismissed&&(
+        <div style={{background:C.primaryLight,border:"1px solid #bfdbfe",borderRadius:14,
+          padding:"12px 16px",marginBottom:14,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:700,color:C.primary}}>
+              📞 {mineCount} call{mineCount>1?"s":""} assigned to you
+            </div>
+            <div style={{fontSize:12,color:C.primary,opacity:.8,marginTop:2}}>Tap "My Calls" to view</div>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <button onClick={()=>setFilter("mine")} style={{background:C.primary,color:"#fff",border:"none",
+              borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              My Calls
+            </button>
+            <button onClick={()=>setBannerDismissed(true)} style={{background:"none",border:"none",
+              cursor:"pointer",color:C.primary,fontSize:18,lineHeight:1,padding:4,opacity:.7}}>×</button>
+          </div>
+        </div>
+      )}
+
+      {/* Filter tabs */}
+      <div style={{display:"flex",gap:8,marginBottom:16,overflowX:"auto",paddingBottom:4}}>
+        {[
+          {id:"open",     label:`All Open (${openCount})`},
+          {id:"mine",     label:`Mine (${mineCount})`},
+          {id:"resolved", label:"Resolved"},
+        ].map((f:any)=>(
+          <button key={f.id} onClick={()=>setFilter(f.id)} style={{
+            padding:"7px 16px",borderRadius:20,border:filter===f.id?"none":`1px solid ${C.border}`,
+            cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:filter===f.id?700:500,
+            background:filter===f.id?C.primary:C.surface,
+            color:filter===f.id?"#fff":C.textMid,flexShrink:0}}>
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Calls list */}
+      {loading ? (
+        <div style={{textAlign:"center",padding:"48px 0",color:C.textMuted}}>Loading calls…</div>
+      ) : filtered.length===0 ? (
+        <div style={{textAlign:"center",padding:"48px 16px",color:C.textMuted}}>
+          <div style={{fontSize:36,marginBottom:10}}>📭</div>
+          <div style={{fontSize:14}}>No {filter==="resolved"?"resolved":"open"} calls</div>
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {filtered.map((call:any)=>(
+            <div key={call.id} style={{...card,padding:14,
+              borderLeft:`4px solid ${CALL_PRIORITY[call.priority].color}`,
+              cursor:"pointer"}}
+              onClick={()=>{setSelected(call);setModal("detail");}}>
+              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:4}}>
+                    <span style={{fontWeight:800,fontSize:15,color:C.text,fontFamily:"monospace"}}>
+                      {call.atm.terminal_id}
+                    </span>
+                    <span style={{background:C.primaryLight,color:C.primary,borderRadius:5,
+                      padding:"2px 7px",fontSize:11,fontWeight:700}}>
+                      {call.atm.bank.short_code}
+                    </span>
+                    <span style={{background:CALL_TYPE[call.call_type].bg,
+                      color:CALL_TYPE[call.call_type].color,borderRadius:5,
+                      padding:"2px 7px",fontSize:11,fontWeight:700}}>
+                      {CALL_TYPE[call.call_type].label}
+                    </span>
+                    {call.is_mine&&(
+                      <span style={{background:C.primaryLight,color:C.primary,borderRadius:5,
+                        padding:"2px 7px",fontSize:11,fontWeight:700}}>👤 Mine</span>
+                    )}
+                  </div>
+                  <div style={{fontSize:13,color:C.textMid,marginBottom:4}}>{call.atm.location}</div>
+                  <div style={{fontSize:13,color:C.text,lineHeight:1.5}}>
+                    {call.fault_description.length>80
+                      ? call.fault_description.slice(0,80)+"…"
+                      : call.fault_description}
+                  </div>
+                  {call.notes&&(
+                    <div style={{marginTop:5,background:"#fefce8",borderLeft:"3px solid #eab308",
+                      borderRadius:"0 6px 6px 0",padding:"5px 10px",fontSize:12,color:"#713f12"}}>
+                      📝 {call.notes}
+                    </div>
+                  )}
+                  {!isClosed(call.status)&&(
+                    <div style={{marginTop:6}}>
+                      <NoteEditor call={call} onSave={saveNote}/>
+                    </div>
+                  )}
+                </div>
+                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
+                  <span style={{background:CALL_PRIORITY[call.priority].bg,
+                    color:CALL_PRIORITY[call.priority].color,
+                    borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
+                    {CALL_PRIORITY[call.priority].label}
+                  </span>
+                  <span style={{background:CALL_STATUS[call.status].bg,
+                    color:CALL_STATUS[call.status].color,
+                    borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
+                    {CALL_STATUS[call.status].label}
+                  </span>
+                  {(()=>{const s=slaInfo(call);return s?(<span style={{background:s.bg,color:s.color,borderRadius:20,padding:"3px 9px",fontSize:11,fontWeight:700}}>⏱ {s.text}</span>):null;})()}
+                </div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+                marginTop:10,paddingTop:8,borderTop:`1px solid ${C.surface}`,flexWrap:"wrap",gap:8}}>
+                <div style={{display:"flex",gap:12}}>
+                  <span style={{fontSize:12,color:C.textMuted}}>#{call.id}</span>
+                  <span style={{fontSize:12,color:C.textMuted}}>{fmt(call.created_at)}</span>
+                  <span style={{fontSize:12,color:call.engineer?C.textMid:C.danger,fontWeight:call.engineer?400:600}}>
+                    {call.engineer?`👷 ${call.engineer.name}`:"⚠ Unassigned"}
+                  </span>
+                </div>
+                <div style={{display:"flex",gap:8}} onClick={e=>e.stopPropagation()}>
+                  {!call.engineer&&call.status==="pending"&&(
+                    <button onClick={()=>selfAssign(call)} style={{
+                      background:C.primary,color:"#fff",border:"none",borderRadius:8,
+                      padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",
+                      fontFamily:"inherit"}}>
+                      + Take Call
+                    </button>
+                  )}
+                  {(call.is_mine||!call.engineer)&&call.status!=="resolved"&&(
+                    <button onClick={()=>{setSelected(call);setModal("close");}} style={{
+                      background:C.successLight,color:C.success,border:"1px solid #bbf7d0",
+                      borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,
+                      cursor:"pointer",fontFamily:"inherit"}}>
+                      ✓ Close Call
+                    </button>
+                  )}
+                  {call.is_mine&&call.status!=="resolved"&&(
+                    <button onClick={()=>returnCall(call)} style={{
+                      background:"#fff7ed",color:"#ea580c",border:"1px solid #fed7aa",
+                      borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,
+                      cursor:"pointer",fontFamily:"inherit"}}>
+                      ↩ Return
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Detail Modal */}
+      {modal==="detail"&&selected&&(
+        <Modal title={`Call #${selected.id}`}
+          subtitle={`${selected.atm.terminal_id} · ${selected.atm.location}`}
+          onClose={()=>setModal(null)}>
+          <div style={{display:"flex",flexDirection:"column",gap:14,paddingBottom:8}}>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <span style={{background:CALL_PRIORITY[selected.priority].bg,color:CALL_PRIORITY[selected.priority].color,borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:700}}>{CALL_PRIORITY[selected.priority].label}</span>
+              <span style={{background:CALL_STATUS[selected.status].bg,color:CALL_STATUS[selected.status].color,borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:700}}>{CALL_STATUS[selected.status].label}</span>
+              <span style={{background:CALL_TYPE[selected.call_type].bg,color:CALL_TYPE[selected.call_type].color,borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:700}}>{CALL_TYPE[selected.call_type].label}</span>
+            </div>
+            <div style={{background:C.surface,borderRadius:12,padding:14,display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              {[["ATM",selected.atm.terminal_id],["Bank",selected.atm.bank.name],["Location",selected.atm.location],["Opened",fmt(selected.created_at)],["Assigned to",selected.engineer?.name??"Unassigned"],["Job Cards",String(selected.job_cards_count)]].map(([k,v])=>(
+                <div key={k}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em"}}>{k}</div>
+                  <div style={{fontSize:14,fontWeight:600,color:C.text,marginTop:2}}>{v}</div>
+                </div>
+              ))}
+            </div>
+            <div>
+              <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:8}}>Fault</div>
+              <div style={{background:C.surface,borderRadius:10,padding:"12px 14px",fontSize:14,color:C.text,lineHeight:1.7}}>{selected.fault_description}</div>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              {!selected.engineer&&selected.status==="pending"&&(
+                <Btn variant="primary" onClick={()=>{selfAssign(selected);setModal(null);}} full>+ Take This Call</Btn>
+              )}
+              {(selected.is_mine||!selected.engineer)&&selected.status!=="resolved"&&(
+                <Btn variant="success" onClick={()=>setModal("close")} full>✓ Close Call</Btn>
+              )}
+              <Btn variant="secondary" onClick={()=>setModal(null)} full>Close</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Close Call Form Modal */}
+      {modal==="close"&&selected&&(
+        <Modal title={`Close Call #${selected.id}`}
+          subtitle="Enter resolution details and submit a job card"
+          onClose={()=>setModal(null)}>
+          <CloseCallForm
+            call={selected} atms={atms}
+            onClose={()=>setModal(null)}
+            onSaved={()=>{
+              setModal(null);
+              addToast("Call closed and job card created!","success");
+              load();
+            }}
+          />
+        </Modal>
+      )}
+    </div>
+  );
+};
+
 
 // ─── Login Screen ─────────────────────────────────────────────────────────────
 const LoginScreen = ({errors}:any) => {
@@ -849,8 +1342,9 @@ const LoginScreen = ({errors}:any) => {
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 const Dashboard = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear,flash}:any) => {
   const [tab,setTab]           = useState("home");
-  const [modal,setModal]       = useState<null|"detail"|"drawer">(null);
-  const [detailCard,setDetail] = useState<JobCard|null>(null);
+  const [modal,setModal]           = useState<null|"detail"|"drawer">(null);
+  const [profileOpen,setProfileOpen] = useState(false);
+  const [detailCard,setDetail]     = useState<JobCard|null>(null);
   const [toasts,setToasts]     = useState<any[]>([]);
   const [logAtmId,setLogAtmId] = useState<number|null>(null);
   const [logType,setLogType]   = useState("Quarterly PM");
@@ -958,12 +1452,56 @@ const Dashboard = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear,
                   ⚡ Switch to Admin
                 </a>
               )}
-              <div style={{display:"flex",alignItems:"center",gap:8,
-                border:`1px solid ${C.border}`,borderRadius:20,padding:"5px 12px 5px 6px"}}>
-                <div style={{width:28,height:28,borderRadius:14,background:C.primaryLight,
-                  display:"flex",alignItems:"center",justifyContent:"center",
-                  fontSize:12,fontWeight:800,color:C.primary}}>{initials}</div>
-                <span style={{fontSize:13,fontWeight:600,color:C.text}}>{engineer.name}</span>
+              <div style={{position:"relative"}}>
+                <button onClick={()=>setProfileOpen(o=>!o)} style={{
+                  display:"flex",alignItems:"center",gap:8,
+                  border:`1px solid ${profileOpen?C.primary:C.border}`,
+                  borderRadius:20,padding:"5px 12px 5px 6px",
+                  background:"none",cursor:"pointer",fontFamily:"inherit",transition:"border-color .15s",
+                }}>
+                  <div style={{width:28,height:28,borderRadius:14,background:C.primaryLight,
+                    display:"flex",alignItems:"center",justifyContent:"center",
+                    fontSize:12,fontWeight:800,color:C.primary}}>{initials}</div>
+                  <span style={{fontSize:13,fontWeight:600,color:C.text}}>{engineer.name}</span>
+                  <span style={{fontSize:9,color:C.textMuted}}>{profileOpen?"▲":"▼"}</span>
+                </button>
+                {profileOpen&&(
+                  <>
+                    <div style={{position:"fixed",inset:0,zIndex:199}} onClick={()=>setProfileOpen(false)}/>
+                    <div style={{position:"absolute",right:0,top:"calc(100% + 8px)",
+                      background:C.white,border:`1px solid ${C.border}`,borderRadius:16,
+                      boxShadow:"0 8px 24px rgba(0,0,0,.10)",minWidth:240,zIndex:200,overflow:"hidden"}}>
+                      <div style={{padding:"16px 18px",borderBottom:`1px solid ${C.border}`,
+                        background:C.surface,display:"flex",alignItems:"center",gap:12}}>
+                        <div style={{width:44,height:44,borderRadius:22,background:C.primaryLight,
+                          display:"flex",alignItems:"center",justifyContent:"center",
+                          fontSize:16,fontWeight:800,color:C.primary,flexShrink:0}}>{initials}</div>
+                        <div>
+                          <div style={{fontSize:14,fontWeight:700,color:C.text}}>{engineer.name}</div>
+                          <div style={{fontSize:12,color:C.textMuted,marginTop:1}}>{engineer.region} Region</div>
+                          <div style={{marginTop:5,display:"inline-flex",background:C.primaryLight,borderRadius:999,padding:"2px 10px"}}>
+                            <span style={{fontSize:10,fontWeight:700,color:C.primary}}>Field Engineer</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{padding:"6px 0"}}>
+                        {[{icon:"✉️",label:engineer.email||"—"},{icon:"📞",label:engineer.phone||"—"}].map(({icon,label})=>(
+                          <div key={label} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 18px",fontSize:13,color:C.textMid}}>
+                            <span>{icon}</span><span>{label}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{borderTop:`1px solid ${C.border}`,padding:8}}>
+                        <button onClick={()=>{if(confirm("Sign out?"))router.post("/logout");}}
+                          style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",
+                            borderRadius:8,border:"none",background:"none",cursor:"pointer",
+                            fontFamily:"inherit",fontSize:13,fontWeight:600,color:C.danger}}>
+                          <span>🚪</span> Sign Out
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -990,10 +1528,52 @@ const Dashboard = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear,
               display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🏧</div>
             <span style={{fontSize:14,fontWeight:800,color:C.text}}>NCR Engineer</span>
           </div>
-          {/* Avatar */}
-          <div style={{width:32,height:32,borderRadius:16,background:C.primaryLight,
-            display:"flex",alignItems:"center",justifyContent:"center",
-            fontSize:12,fontWeight:800,color:C.primary}}>{initials}</div>
+          {/* Avatar — opens profile dropdown */}
+          <div style={{position:"relative"}}>
+            <button onClick={()=>setProfileOpen(o=>!o)} style={{
+              width:32,height:32,borderRadius:16,background:C.primaryLight,
+              display:"flex",alignItems:"center",justifyContent:"center",
+              fontSize:12,fontWeight:800,color:C.primary,
+              border:`2px solid ${profileOpen?C.primary:"transparent"}`,cursor:"pointer",
+            }}>{initials}</button>
+            {profileOpen&&(
+              <>
+                <div style={{position:"fixed",inset:0,zIndex:199}} onClick={()=>setProfileOpen(false)}/>
+                <div style={{position:"absolute",right:0,top:"calc(100% + 8px)",
+                  background:C.white,border:`1px solid ${C.border}`,borderRadius:16,
+                  boxShadow:"0 8px 24px rgba(0,0,0,.10)",minWidth:220,zIndex:200,overflow:"hidden"}}>
+                  <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`,
+                    background:C.surface,display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:40,height:40,borderRadius:20,background:C.primaryLight,
+                      display:"flex",alignItems:"center",justifyContent:"center",
+                      fontSize:14,fontWeight:800,color:C.primary,flexShrink:0}}>{initials}</div>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:C.text}}>{engineer.name}</div>
+                      <div style={{fontSize:11,color:C.textMuted}}>{engineer.region} Region</div>
+                      <div style={{marginTop:4,display:"inline-flex",background:C.primaryLight,borderRadius:999,padding:"1px 8px"}}>
+                        <span style={{fontSize:10,fontWeight:700,color:C.primary}}>Field Engineer</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{padding:"6px 0"}}>
+                    {[{icon:"✉️",label:engineer.email||"—"},{icon:"📞",label:engineer.phone||"—"}].map(({icon,label})=>(
+                      <div key={label} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 16px",fontSize:12,color:C.textMid}}>
+                        <span>{icon}</span><span>{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{borderTop:`1px solid ${C.border}`,padding:8}}>
+                    <button onClick={()=>{if(confirm("Sign out?"))router.post("/logout");}}
+                      style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",
+                        borderRadius:8,border:"none",background:"none",cursor:"pointer",
+                        fontFamily:"inherit",fontSize:13,fontWeight:600,color:C.danger}}>
+                      <span>🚪</span> Sign Out
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* ── MOBILE DRAWER OVERLAY ── */}
@@ -1049,37 +1629,66 @@ const Dashboard = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear,
         )}
 
         {/* ── TAB CONTENT ── */}
-        <div style={{paddingBottom:isMobile?72:0}}>
+        <div style={{paddingBottom:isMobile?96:0}}>
           {tab==="home"    && <HomeTab    engineer={engineer} atms={atms} jobCards={jobCards} pmRecords={pmRecords} currentQuarter={currentQuarter} currentYear={currentYear}/>}
           {tab==="pm"      && <PMTab      pmRecords={pmRecords} currentQuarter={currentQuarter} currentYear={currentYear} onLogJobCard={openLog}/>}
           {tab==="log"     && <LogTab     atms={atms} onSave={(submitted:boolean)=>{ addToast(submitted?"Submitted for review!":"Saved as draft.","success"); router.reload(); setTab("cards"); }}/>}
           {tab==="cards"   && <CardsTab   jobCards={jobCards} onView={(c:JobCard)=>{setDetail(c);setModal("detail");}}/>}
           {tab==="profile" && <ProfileTab engineer={engineer}/>}
+          {tab==="calls"   && <CallsTab atms={atms} engineer={engineer} addToast={addToast}/>}
         </div>
 
-        {/* ── MOBILE BOTTOM NAV ── */}
-        <div style={{position:"fixed",bottom:0,left:0,right:0,display:isMobile?"flex":"none",
-          zIndex:100,background:C.white,borderTop:`1px solid ${C.border}`,
-          boxShadow:"0 -4px 16px rgba(0,0,0,.06)",height:64,flexDirection:"row"}}>
-          {TABS.map((t:any)=>{
-            const active=tab===t.id;
-            return (
-              <button key={t.id} onClick={()=>setTab(t.id)} style={{
-                flex:1,display:"flex",flexDirection:"column",alignItems:"center",
-                justifyContent:"center",gap:3,border:"none",background:"none",
-                cursor:"pointer",fontFamily:"inherit",padding:"8px 4px",
-                position:"relative",
-              }}>
-                {active&&<div style={{position:"absolute",top:0,left:"50%",
-                  transform:"translateX(-50%)",width:32,height:3,
-                  borderRadius:"0 0 3px 3px",background:C.primary}}/>}
-                <span style={{fontSize:18,lineHeight:1,opacity:active?1:.45}}>{t.icon}</span>
-                <span style={{fontSize:10,fontWeight:active?700:500,
-                  color:active?C.primary:C.textMuted,lineHeight:1}}>{t.label}</span>
-              </button>
-            );
-          })}
-        </div>
+        {/* ── FLOATING MOBILE BOTTOM NAV ── */}
+        {isMobile&&(
+          <div style={{
+            position:"fixed", bottom:16, left:"50%",
+            transform:"translateX(-50%)",
+            zIndex:100,
+            display:"flex",
+            background:"rgba(255,255,255,0.82)",
+            backdropFilter:"blur(20px)",
+            WebkitBackdropFilter:"blur(20px)",
+            borderRadius:32,
+            border:"1px solid rgba(255,255,255,0.6)",
+            boxShadow:"0 8px 32px rgba(0,0,0,.14), 0 2px 8px rgba(0,0,0,.08)",
+            padding:"6px 6px",
+            gap:2,
+          }}>
+            {TABS.map((t:any)=>{
+              const active = tab===t.id;
+              return (
+                <button key={t.id} onClick={()=>setTab(t.id)} style={{
+                  display:"flex", flexDirection:"column", alignItems:"center",
+                  justifyContent:"center", gap:3,
+                  border:"none", cursor:"pointer", fontFamily:"inherit",
+                  padding: active ? "8px 18px" : "8px 14px",
+                  borderRadius:26,
+                  background: active ? C.primary : "transparent",
+                  transition:"all .22s cubic-bezier(.34,1.56,.64,1)",
+                  minWidth: active ? 72 : 48,
+                  position:"relative",
+                }}>
+                  <span style={{
+                    fontSize:19, lineHeight:1,
+                    filter: active ? "brightness(10)" : "none",
+                    transition:"filter .2s",
+                  }}>{t.icon}</span>
+                  {active && (
+                    <span style={{
+                      fontSize:10, fontWeight:700,
+                      color:"#fff",
+                      lineHeight:1,
+                      maxWidth:64,
+                      overflow:"hidden",
+                      whiteSpace:"nowrap",
+                      textOverflow:"ellipsis",
+                    }}>{t.label}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* ── DETAIL MODAL ── */}
         {modal==="detail"&&detailCard&&(

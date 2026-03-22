@@ -8,5 +8,12 @@
   .eng-desktop-nav { display: none; }
   .eng-bottom-nav  { display: flex; }
   .eng-hamburger   { display: flex; align-items: center; justify-content: space-between; }
-  .eng-content     { padding-bottom: 72px; }
+  .eng-content     { padding-bottom: 96px; }
+}
+
+/* Floating nav safe area for devices with home indicator */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .eng-floating-nav {
+    bottom: calc(16px + env(safe-area-inset-bottom));
+  }
 }

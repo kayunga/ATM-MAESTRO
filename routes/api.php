@@ -1,32 +1,47 @@
 <?php
+// routes/api.php
 
-use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\EngineerAtmController;
-use App\Http\Controllers\Api\JobCardController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AtmController;
+use App\Http\Controllers\MaintenanceController;
+use App\Http\Controllers\EngineerController;
 
-// ── Public ────────────────────────────────────────────────────────────────────
-Route::post('/auth/login', [AuthController::class, 'login']);
+/*
+|--------------------------------------------------------------------------
+| NCR ATM Fleet Manager — API Routes
+|--------------------------------------------------------------------------
+|
+| All routes are prefixed with /api (configured in bootstrap/app.php)
+| and return JSON responses.
+|
+*/
 
-// ── Authenticated (Sanctum) ───────────────────────────────────────────────────
-Route::middleware('auth:sanctum')->group(function () {
+// ── Dashboard ──────────────────────────────────────────────────────────────
+Route::get('/stats', [AtmController::class, 'stats']);
 
-    Route::get ('/auth/me',     [AuthController::class, 'me']);
-    Route::post('/auth/logout', [AuthController::class, 'logout']);
+// ── ATMs ───────────────────────────────────────────────────────────────────
+Route::apiResource('atms', AtmController::class);
+// GET    /api/atms           → index  (supports ?search=, ?status=, ?engineer_id=)
+// POST   /api/atms           → store
+// GET    /api/atms/{id}      → show   (includes maintenance records)
+// PUT    /api/atms/{id}      → update
+// DELETE /api/atms/{id}      → destroy
 
-    Route::get('/my-atms', [EngineerAtmController::class, 'index']);
+// ── Maintenance ────────────────────────────────────────────────────────────
+Route::get('/maintenance/due', [MaintenanceController::class, 'due']);
+// GET /api/maintenance/due?quarter=3&year=2024  → ATMs missing quarterly PM
 
-    Route::get   ('/job-cards',                  [JobCardController::class, 'index']);
-    Route::post  ('/job-cards',                  [JobCardController::class, 'store']);
-    Route::get   ('/job-cards/{jobCard}',        [JobCardController::class, 'show']);
-    Route::put   ('/job-cards/{jobCard}',        [JobCardController::class, 'update']);
-    Route::delete('/job-cards/{jobCard}',        [JobCardController::class, 'destroy']);
-    Route::post  ('/job-cards/{jobCard}/photos', [JobCardController::class, 'uploadPhotos']);
-    Route::post  ('/job-cards/{jobCard}/submit', [JobCardController::class, 'submit']);
+Route::apiResource('maintenance', MaintenanceController::class);
+// GET    /api/maintenance       → index  (supports ?atm_id=, ?status=, ?type=, ?quarter=, ?year=)
+// POST   /api/maintenance       → store
+// GET    /api/maintenance/{id}  → show
+// PUT    /api/maintenance/{id}  → update
+// DELETE /api/maintenance/{id}  → destroy
 
-    Route::prefix('admin')->group(function () {
-        Route::get ('/job-cards',                   [JobCardController::class, 'adminIndex']);
-        Route::post('/job-cards/{jobCard}/approve', [JobCardController::class, 'approve']);
-        Route::post('/job-cards/{jobCard}/reject',  [JobCardController::class, 'reject']);
-    });
-});
+// ── Engineers ──────────────────────────────────────────────────────────────
+Route::apiResource('engineers', EngineerController::class);
+// GET    /api/engineers       → index  (supports ?region=)
+// POST   /api/engineers       → store
+// GET    /api/engineers/{id}  → show   (includes assigned ATMs)
+// PUT    /api/engineers/{id}  → update
+// DELETE /api/engineers/{id}  → destroy

@@ -38,7 +38,7 @@ export const normAtm = (a: Atm): Atm => ({
   serialNumber: a.serial_number ?? a.serialNumber,
   bankId:       a.bank_id       ?? a.bankId,
   engineerId:   a.engineer_id   ?? a.engineerId,
-  installDate:  a.install_date  ?? a.installDate,
+  installDate:  toDateStr(a.install_date ?? a.installDate),
 });
 
 export const normBank = (b: Bank): Bank => ({
@@ -49,12 +49,19 @@ export const normBank = (b: Bank): Bank => ({
   contactEmail:  b.contact_email   ?? b.contactEmail,
 });
 
+const toDateStr = (v: any): string => {
+  if (!v) return "";
+  const s = String(v);
+  // ISO datetime or date-only — slice to YYYY-MM-DD
+  return s.slice(0, 10);
+};
+
 export const normMaint = (m: MaintenanceRecord): MaintenanceRecord => ({
   ...m,
   atmId:         m.atm_id          ?? m.atmId,
   engineerId:    m.engineer_id     ?? m.engineerId,
-  scheduledDate: m.scheduled_date  ?? m.scheduledDate,
-  completedDate: m.completed_date  ?? m.completedDate,
+  scheduledDate: toDateStr(m.scheduled_date ?? m.scheduledDate),
+  completedDate: toDateStr(m.completed_date ?? m.completedDate),
 });
 
 export const normEng = <T>(e: T): T => ({ ...e });

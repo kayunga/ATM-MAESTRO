@@ -24,26 +24,10 @@ return new class extends Migration
             $table->softDeletes();
         });
 
-        // Add bank_id FK to atms table (banks must exist first)
-        Schema::table('atms', function (Blueprint $table) {
-            $table->foreignId('bank_id')
-                  ->nullable()
-                  ->after('serial_number')
-                  ->constrained('banks')
-                  ->nullOnDelete();
-        });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
-        Schema::table('atms', function (Blueprint $table) {
-            $table->dropForeign(['bank_id']);
-            $table->dropColumn('bank_id');
-        });
-
         Schema::dropIfExists('banks');
     }
 };

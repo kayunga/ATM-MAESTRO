@@ -4,18 +4,21 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Carbon\Carbon;
 
 class TechmastersSeeder extends Seeder
 {
     public function run(): void
     {
-        DB::statement('SET FOREIGN_KEY_CHECKS=0;');
+        DB::statement('SET session_replication_role = replica;');
         DB::table('maintenance_records')->truncate();
         DB::table('atms')->truncate();
         DB::table('engineers')->truncate();
         DB::table('banks')->truncate();
-        DB::statement('SET FOREIGN_KEY_CHECKS=1;');
+        // Remove any existing engineer portal user accounts (non-admin)
+        DB::table('users')->where('is_admin', false)->delete();
+        DB::statement('SET session_replication_role = DEFAULT;');
 
         $now = Carbon::now();
 
@@ -97,161 +100,58 @@ class TechmastersSeeder extends Seeder
 
         $banks = DB::table('banks')->pluck('id', 'short_code');
 
-        // ── Engineers ─────────────────────────────────────────────────────────
-        DB::table('engineers')->insert([
-            [
-                'name'       => 'Albert',
+        // ── Engineers + Portal User Accounts ──────────────────────────────────
+        // Each engineer gets a user account for the portal.
+        // Login: firstname.lastname@techmasters.zm (or firstname@techmasters.zm)
+        // Password: test@1234
+        $engineerData = [
+            ['name' => 'Albert',      'region' => 'Lusaka'],
+            ['name' => 'Brian',       'region' => 'Southern'],
+            ['name' => 'Christopher', 'region' => 'North Western'],
+            ['name' => 'Daniel',      'region' => 'Lusaka'],
+            ['name' => 'Fred',        'region' => 'Southern'],
+            ['name' => 'Gilbert',     'region' => 'Eastern'],
+            ['name' => 'Kasampi',     'region' => 'Southern'],
+            ['name' => 'Lazarus',     'region' => 'Northern'],
+            ['name' => 'Mapalo',      'region' => 'Lusaka'],
+            ['name' => 'Milambo',     'region' => 'Luapula'],
+            ['name' => 'Mubita',      'region' => 'Western'],
+            ['name' => 'Oliver',      'region' => 'Copperbelt'],
+            ['name' => 'Phaless',     'region' => 'Lusaka'],
+            ['name' => 'Philip',      'region' => 'Lusaka'],
+            ['name' => 'Praise',      'region' => 'Lusaka'],
+            ['name' => 'Presley',     'region' => 'Lusaka'],
+            ['name' => 'Robert',      'region' => 'Lusaka'],
+            ['name' => 'Robinson',    'region' => 'Copperbelt'],
+            ['name' => 'Terence',     'region' => 'Central'],
+        ];
+
+        $hashedPassword = Hash::make('test@1234');
+
+        foreach ($engineerData as $eng) {
+            $firstName = strtolower($eng['name']);
+            $email     = "{$firstName}@techmasters.zm";
+
+            $userId = DB::table('users')->insertGetId([
+                'name'              => $eng['name'],
+                'email'             => $email,
+                'email_verified_at' => $now,
+                'password'          => $hashedPassword,
+                'is_admin'          => false,
+                'created_at'        => $now,
+                'updated_at'        => $now,
+            ]);
+
+            DB::table('engineers')->insert([
+                'name'       => $eng['name'],
                 'phone'      => null,
-                'email'      => null,
-                'region'     => 'Lusaka',
+                'email'      => $email,
+                'region'     => $eng['region'],
+                'user_id'    => $userId,
                 'created_at' => $now,
                 'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Brian',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Southern',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Christopher',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'North Western',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Daniel',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Lusaka',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Fred',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Southern',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Gilbert',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Eastern',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Kasampi',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Southern',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Lazarus',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Northern',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Mapalo',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Lusaka',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Milambo',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Luapula',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Mubita',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Western',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Oliver',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Copperbelt',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Phaless',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Lusaka',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Philip',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Lusaka',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Praise',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Lusaka',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Presley',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Lusaka',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Robert',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Lusaka',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Robinson',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Copperbelt',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'name'       => 'Terence',
-                'phone'      => null,
-                'email'      => null,
-                'region'     => 'Central',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-        ]);
+            ]);
+        }
 
         $engineers = DB::table('engineers')->pluck('id', 'name');
 

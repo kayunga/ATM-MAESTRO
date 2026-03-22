@@ -25,6 +25,13 @@ return Application::configure(basePath: dirname(__DIR__))
             AddLinkHeadersForPreloadedAssets::class,
         ]);
 
+        // Exclude job-card JSON endpoints from CSRF — protected by auth session instead
+        $middleware->validateCsrfTokens(except: [
+            'job-cards/*/approve',
+            'job-cards/*/reject',
+            'job-cards/bulk-download',
+        ]);
+
         $middleware->alias([
             'admin' => \App\Http\Middleware\AdminMiddleware::class,
         ]);

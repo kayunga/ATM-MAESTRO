@@ -11,6 +11,7 @@ import { Badge, Btn, Input, Modal, Card, StatCard, EmptyState, Confirm, Checkbox
 import type { PageProps } from "./types";
 import "./atm-fleet.css";
 import JobCardsModule from "./JobCardsModule";
+import CallsModule from "./CallsModule";
 
 // ─── PDF Export ───────────────────────────────────────────────────────────────
 // Uses jsPDF + jspdf-autotable loaded from CDN via a one-time dynamic import.
@@ -445,20 +446,148 @@ const MaintForm = ({initial,atms,engineers,banks,onSave,onClose}) => {
   );
 };
 
-const defaultEng={name:"",phone:"",email:"",region:""};
+const defaultEng={name:"",phone:"",email:"",region:"",create_login:false,password:"",password_confirmation:""};
 const EngForm = ({initial,onSave,onClose}) => {
-  const [form,setForm]=useState(initial||defaultEng);
-  const set=k=>v=>setForm(f=>({...f,[k]:v}));
-  const valid=form.name&&form.region;
+  const isEdit = !!initial?.id;
+  const hasLogin = !!initial?.user_id;
+  const [form,setForm] = useState(isEdit
+    ? {...initial, create_login:false, password:"", password_confirmation:"", revoke_login:false}
+    : defaultEng);
+  const set = k=>v=>setForm(f=>({...f,[k]:v}));
+
+  const pwMismatch  = form.create_login && form.password && form.password_confirmation && form.password !== form.password_confirmation;
+  const pwTooShort  = form.create_login && form.password && form.password.length < 8;
+  const loginValid  = !form.create_login || (form.email && form.password.length >= 8 && form.password === form.password_confirmation);
+  const valid       = form.name && form.region && loginValid;
+
+  const inputStyle:any = {padding:"10px 14px",borderRadius:8,border:`1.5px solid ${C.border}`,fontSize:14,fontFamily:"inherit",outline:"none",width:"100%",boxSizing:"border-box",color:C.text,background:C.surface};
+
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
+
+      {/* Basic info */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
         <Input label="Full Name" value={form.name} onChange={set("name")} required placeholder="John Doe"/>
-        <Input label="Region" value={form.region} onChange={set("region")} required placeholder="Lusaka"/>
-        <Input label="Phone" value={form.phone} onChange={set("phone")} placeholder="+260 97 000 0000"/>
-        <Input label="Email" value={form.email} onChange={set("email")} type="email" placeholder="j.doe@company.zm"/>
+        <Input label="Region"    value={form.region} onChange={set("region")} required placeholder="Lusaka"/>
+        <Input label="Phone"     value={form.phone}  onChange={set("phone")}  placeholder="+260 97 000 0000"/>
+        <Input label="Email"     value={form.email}  onChange={set("email")}  type="email" placeholder="j.doe@techmasters.zm"/>
       </div>
-      <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn onClick={()=>valid&&onSave(form)} disabled={!valid}>Save Engineer</Btn></div>
+
+      {/* ── Portal login section ── */}
+      <div style={{borderTop:`1px solid ${C.border}`,paddingTop:16}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.textMuted,letterSpacing:"0.06em",marginBottom:12}}>ENGINEER PORTAL ACCESS</div>
+
+        {isEdit && hasLogin ? (
+          /* ── Existing login — show status + revoke option ── */
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:C.successLight,border:`1px solid ${C.success}33`,borderRadius:10,padding:"12px 16px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:20}}>🔐</span>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:C.success}}>Portal login active</div>
+                  <div style={{fontSize:12,color:C.textMuted,marginTop:1}}>Engineer can sign in at /login</div>
+                </div>
+              </div>
+              {/* Revoke toggle */}
+              <button onClick={()=>set("revoke_login")(!form.revoke_login)} style={{
+                display:"flex",alignItems:"center",gap:6,padding:"6px 12px",borderRadius:8,cursor:"pointer",
+                fontFamily:"inherit",fontSize:12,fontWeight:600,border:`1px solid ${form.revoke_login?C.red:C.border}`,
+                background:form.revoke_login?C.dangerLight:"#fff",color:form.revoke_login?C.red:C.textMid,
+              }}>
+                {form.revoke_login ? "↩ Undo revoke" : "🚫 Revoke login"}
+              </button>
+            </div>
+            {form.revoke_login && (
+              <div style={{background:C.dangerLight,border:`1px solid ${C.red}33`,borderRadius:8,padding:"10px 14px",fontSize:13,color:C.red,fontWeight:500}}>
+                ⚠ Saving will delete this engineer's user account and remove portal access.
+              </div>
+            )}
+          </div>
+        ) : isEdit && !hasLogin ? (
+          /* ── Edit, no login yet — offer to create one ── */
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:600,color:C.text}}>No portal login yet</div>
+                <div style={{fontSize:12,color:C.textMuted,marginTop:2}}>Create a login so this engineer can access their portal</div>
+              </div>
+              <button onClick={()=>set("create_login")(!form.create_login)} style={{
+                width:44,height:24,borderRadius:12,border:"none",cursor:"pointer",
+                background:form.create_login?C.accent:C.border,position:"relative",transition:"background .2s",flexShrink:0,
+              }}>
+                <span style={{position:"absolute",top:3,left:form.create_login?22:3,width:18,height:18,borderRadius:9,background:"#fff",transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}/>
+              </button>
+            </div>
+            {form.create_login && (
+              <div style={{display:"flex",flexDirection:"column",gap:12,background:C.accentLight,borderRadius:10,padding:14,border:`1px solid ${C.accent}22`}}>
+                <div style={{fontSize:12,color:C.accent,fontWeight:600}}>🔐 Uses the email above as login. Set a password to complete.</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                  <div className="field-wrap">
+                    <label className="field-label">Password <span className="field-required">*</span></label>
+                    <input type="password" value={form.password} onChange={e=>set("password")(e.target.value)}
+                      placeholder="Min. 8 characters" style={{...inputStyle,borderColor:pwTooShort?C.red:C.border}}/>
+                    {pwTooShort&&<div style={{fontSize:11,color:C.red,marginTop:4}}>At least 8 characters required</div>}
+                  </div>
+                  <div className="field-wrap">
+                    <label className="field-label">Confirm Password <span className="field-required">*</span></label>
+                    <input type="password" value={form.password_confirmation} onChange={e=>set("password_confirmation")(e.target.value)}
+                      placeholder="Repeat password" style={{...inputStyle,borderColor:pwMismatch?C.red:C.border}}/>
+                    {pwMismatch&&<div style={{fontSize:11,color:C.red,marginTop:4}}>Passwords do not match</div>}
+                  </div>
+                </div>
+                {form.password&&form.password===form.password_confirmation&&form.password.length>=8&&(
+                  <div style={{fontSize:12,color:C.success,fontWeight:600}}>✓ Password looks good</div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          /* ── Create mode — same toggle as before ── */
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:C.text}}>Create Engineer Portal Login</div>
+                <div style={{fontSize:12,color:C.textMuted,marginTop:2}}>Engineer can log in at /login to access their portal</div>
+              </div>
+              <button onClick={()=>set("create_login")(!form.create_login)} style={{
+                width:44,height:24,borderRadius:12,border:"none",cursor:"pointer",
+                background:form.create_login?C.accent:C.border,position:"relative",transition:"background .2s",flexShrink:0,
+              }}>
+                <span style={{position:"absolute",top:3,left:form.create_login?22:3,width:18,height:18,borderRadius:9,background:"#fff",transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}/>
+              </button>
+            </div>
+            {form.create_login && (
+              <div style={{display:"flex",flexDirection:"column",gap:12,background:C.accentLight,borderRadius:10,padding:14,border:`1px solid ${C.accent}22`}}>
+                <div style={{fontSize:12,color:C.accent,fontWeight:600}}>🔐 Login email defaults to the email above. Set a password to complete.</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                  <div className="field-wrap">
+                    <label className="field-label">Password <span className="field-required">*</span></label>
+                    <input type="password" value={form.password} onChange={e=>set("password")(e.target.value)}
+                      placeholder="Min. 8 characters" style={{...inputStyle,borderColor:pwTooShort?C.red:C.border}}/>
+                    {pwTooShort&&<div style={{fontSize:11,color:C.red,marginTop:4}}>At least 8 characters required</div>}
+                  </div>
+                  <div className="field-wrap">
+                    <label className="field-label">Confirm Password <span className="field-required">*</span></label>
+                    <input type="password" value={form.password_confirmation} onChange={e=>set("password_confirmation")(e.target.value)}
+                      placeholder="Repeat password" style={{...inputStyle,borderColor:pwMismatch?C.red:C.border}}/>
+                    {pwMismatch&&<div style={{fontSize:11,color:C.red,marginTop:4}}>Passwords do not match</div>}
+                  </div>
+                </div>
+                {form.password&&form.password===form.password_confirmation&&form.password.length>=8&&(
+                  <div style={{fontSize:12,color:C.success,fontWeight:600}}>✓ Password looks good</div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+        <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+        <Btn onClick={()=>valid&&onSave(form)} disabled={!valid} variant={form.revoke_login?"danger":undefined}>
+          {form.revoke_login ? "Save + Revoke Login" : isEdit ? "Save Changes" : form.create_login ? "Add Engineer + Create Login" : "Add Engineer"}
+        </Btn>
+      </div>
     </div>
   );
 };
@@ -892,6 +1021,23 @@ export default function App(props: PageProps) {
   const [page,setPage]           = useState("dashboard");
   const [modal,setModal]         = useState(null);
   const [bulkModal,setBulkModal] = useState(null);
+  const [pendingCalls,setPendingCalls] = useState(0);
+
+  // Poll pending call count every 60s
+  useEffect(() => {
+    const fetchPending = async () => {
+      try {
+        const res = await fetch("/calls?status=pending", {
+          headers:{Accept:"application/json","X-Requested-With":"XMLHttpRequest"},
+          credentials:"same-origin",
+        });
+        if (res.ok) { const d = await res.json(); setPendingCalls(Array.isArray(d)?d.length:0); }
+      } catch {}
+    };
+    fetchPending();
+    const t = setInterval(fetchPending, 60000);
+    return () => clearInterval(t);
+  }, []);
   const [confirm,setConfirm]     = useState(null);
   const [viewAtm,setViewAtm]     = useState(null);
   const { toast, ToastContainer } = useToast();
@@ -1000,7 +1146,10 @@ export default function App(props: PageProps) {
     }});
   }, [toast]);
 
-  const navItems=[{id:"dashboard",label:"Dashboard",icon:"◈"},{id:"banks",label:"Banks",icon:"🏦"},{id:"atms",label:"ATM Fleet",icon:"🏧"},{id:"maintenance",label:"Maintenance",icon:"🔧"},{id:"engineers",label:"Engineers",icon:"👷"},{id:"jobcards",label:"Job Cards",icon:"📋"}];
+  const navItemsMain=[{id:"dashboard",label:"Dashboard",icon:"◈"},{id:"atms",label:"ATM Fleet",icon:"🏧"},{id:"maintenance",label:"Maintenance",icon:"🔧"},{id:"jobcards",label:"Job Cards",icon:"📋"},{id:"calls",label:"Calls",icon:"📞"}];
+  const navItems=[...navItemsMain,{id:"banks",label:"Banks",icon:"🏦"},{id:"engineers",label:"Engineers",icon:"👷"}];
+  // Badge helper — shows pending count on calls nav item
+  const navBadge = (id:string) => id==="calls"&&pendingCalls>0 ? pendingCalls : null;
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const navigate = (id) => { setPage(id); setDrawerOpen(false); };
@@ -1022,30 +1171,52 @@ export default function App(props: PageProps) {
             <div><div className="nav-logo__name" style={{color:C.text}}>NCR Fleet</div><div className="nav-logo__sub" style={{color:C.textMuted}}>ATM MANAGER</div></div>
           </div>
           <div className="nav-links">
-            {navItems.map(n=>(
+            {navItemsMain.map(n=>(
               <button key={n.id} onClick={()=>setPage(n.id)} className="nav-link"
-                style={{background:page===n.id?"#fff":"transparent",fontWeight:page===n.id?700:500,color:page===n.id?C.accent:C.textMid,boxShadow:page===n.id?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
+                style={{position:"relative",background:page===n.id?"#fff":"transparent",fontWeight:page===n.id?700:500,color:page===n.id?C.accent:C.textMid,boxShadow:page===n.id?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
                 <span className="nav-link__icon">{n.icon}</span>{n.label}
+                {navBadge(n.id)&&<span style={{position:"absolute",top:4,right:4,background:C.red,color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,minWidth:16,height:16,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 3px",lineHeight:1}}>{navBadge(n.id)}</span>}
               </button>
             ))}
           </div>
-          <Btn small variant="teal" onClick={()=>setBulkModal({type:"bulkPM",atms:[]})}>⚡ Bulk PM</Btn>
-          <div className="nav-chips">
-            <div className="nav-chip" style={{color:C.purple}}>🏦 {banks.length}</div>
-            <div className="nav-chip" style={{color:C.textMid}}>🏧 {atms.length}</div>
+          {/* ── Clickable Banks + Engineers counter chips ── */}
+          <div style={{display:"flex",gap:6,alignItems:"center",marginLeft:"auto"}}>
+            {[
+              {id:"banks",     label:"Banks",     count:banks.length,     icon:"🏦", color:C.purple, bg:"#f3e8ff"},
+              {id:"engineers", label:"Engineers", count:engineers.length,  icon:"👷", color:C.teal,   bg:C.tealLight},
+            ].map(chip=>(
+              <button key={chip.id} onClick={()=>setPage(chip.id)} style={{
+                display:"flex",alignItems:"center",gap:6,padding:"5px 10px 5px 8px",
+                borderRadius:20,cursor:"pointer",fontFamily:"inherit",
+                background:page===chip.id?chip.color:chip.bg,
+                border:`1px solid ${chip.color}33`,transition:"all .15s",
+              }}>
+                <span style={{fontSize:14,lineHeight:1}}>{chip.icon}</span>
+                <span style={{fontSize:12,fontWeight:700,color:page===chip.id?"#fff":chip.color}}>{chip.count}</span>
+                <span style={{fontSize:11,fontWeight:500,color:page===chip.id?"rgba(255,255,255,.85)":chip.color}}>{chip.label}</span>
+              </button>
+            ))}
           </div>
-          {/* ── Profile dropdown ── */}
+          {/* ── Profile circle ── */}
           <div style={{position:"relative"}}>
-            <button onClick={()=>setProfileOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:8,background:"none",border:`1px solid ${C.border}`,borderRadius:20,padding:"5px 12px 5px 6px",cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}>
-              <div style={{width:28,height:28,borderRadius:14,background:C.accentLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,color:C.accent}}>{initials}</div>
-              <span style={{fontSize:13,fontWeight:600,color:C.textMid,maxWidth:100,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{authUser?.name ?? "Admin"}</span>
-              <span style={{fontSize:10,color:C.textMuted}}>{profileOpen?"▲":"▼"}</span>
+            <button
+              onClick={()=>setProfileOpen(o=>!o)}
+              title={authUser?.name ?? "Admin"}
+              style={{width:36,height:36,borderRadius:18,background:C.accentLight,
+                border:`2px solid ${profileOpen?C.accent:C.border}`,
+                display:"flex",alignItems:"center",justifyContent:"center",
+                fontSize:13,fontWeight:800,color:C.accent,
+                cursor:"pointer",transition:"all .15s",flexShrink:0}}>
+              {initials}
             </button>
             {profileOpen&&(
-              <div onClick={()=>setProfileOpen(false)} style={{position:"absolute",top:"calc(100% + 8px)",right:0,background:"#fff",border:`1px solid ${C.border}`,borderRadius:14,boxShadow:"0 8px 24px rgba(0,0,0,.10)",minWidth:200,zIndex:500,overflow:"hidden"}}>
-                <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`,background:C.surface}}>
-                  <div style={{fontSize:13,fontWeight:700,color:C.text}}>{authUser?.name ?? "Admin"}</div>
-                  <div style={{fontSize:12,color:C.textMuted,marginTop:2}}>{authUser?.email ?? ""}</div>
+              <div onClick={()=>setProfileOpen(false)} style={{position:"absolute",top:"calc(100% + 8px)",right:0,background:"#fff",border:`1px solid ${C.border}`,borderRadius:14,boxShadow:"0 8px 24px rgba(0,0,0,.10)",minWidth:210,zIndex:500,overflow:"hidden"}}>
+                <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`,background:C.surface,display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{width:36,height:36,borderRadius:18,background:C.accentLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:800,color:C.accent,flexShrink:0}}>{initials}</div>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{authUser?.name ?? "Admin"}</div>
+                    <div style={{fontSize:11,color:C.textMuted,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{authUser?.email ?? ""}</div>
+                  </div>
                 </div>
                 <div style={{padding:8}}>
                   <button onClick={handleLogout} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:8,border:"none",background:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:C.danger}}>
@@ -1069,7 +1240,7 @@ export default function App(props: PageProps) {
           <div className="mobile-topbar__icon" style={{background:C.accent}}>🏧</div>
           <div className="mobile-topbar__title" style={{color:C.text}}>NCR Fleet</div>
         </div>
-        <button onClick={()=>setBulkModal({type:"bulkPM",atms:[]})} style={{background:C.tealLight,border:`1px solid ${C.teal}44`,borderRadius:8,padding:"6px 10px",fontSize:12,fontWeight:700,color:C.teal,cursor:"pointer",fontFamily:"inherit"}}>⚡ PM</button>
+        <div style={{width:36}}/>
       </div>
 
       {/* ── MOBILE DRAWER ── */}
@@ -1096,14 +1267,11 @@ export default function App(props: PageProps) {
             <button key={n.id} onClick={()=>navigate(n.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"12px 12px",borderRadius:10,border:"none",background:active?C.accentLight:"transparent",cursor:"pointer",fontFamily:"inherit",marginBottom:2,transition:"all .15s",textAlign:"left"}}>
               <span style={{fontSize:20,width:28,textAlign:"center",lineHeight:1}}>{n.icon}</span>
               <span style={{fontSize:15,fontWeight:active?700:500,color:active?C.accent:C.text}}>{n.label}</span>
-              {active&&<span style={{marginLeft:"auto",width:6,height:6,borderRadius:3,background:C.accent}}/>}
+              {navBadge(n.id)&&<span style={{marginLeft:"auto",background:"#ef4444",color:"#fff",borderRadius:10,fontSize:10,fontWeight:800,minWidth:18,height:18,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 4px"}}>{navBadge(n.id)}</span>}
+              {active&&!navBadge(n.id)&&<span style={{marginLeft:"auto",width:6,height:6,borderRadius:3,background:C.accent}}/>}
             </button>
           );})}
-          <div className="drawer-divider"/>
-          <button onClick={()=>{setDrawerOpen(false);setBulkModal({type:"bulkPM",atms:[]});}} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"12px 12px",borderRadius:10,border:`1.5px solid ${C.teal}44`,background:C.tealLight,cursor:"pointer",fontFamily:"inherit",marginBottom:6}}>
-            <span style={{fontSize:20,width:28,textAlign:"center"}}>⚡</span>
-            <div><div style={{fontSize:14,fontWeight:700,color:C.teal}}>Bulk PM Log</div><div style={{fontSize:11,color:C.teal+"99",marginTop:1}}>Log PM for multiple ATMs</div></div>
-          </button>
+
         </nav>
         <div style={{padding:"14px 16px",borderTop:`1px solid ${C.border}`,background:C.surface}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
@@ -1137,6 +1305,7 @@ export default function App(props: PageProps) {
             onExport={handleExportPDF}/>}
         {page==="engineers"   &&<EngineersModule   engineers={engineers} atms={atms} banks={banks} onAdd={()=>setModal({type:"eng"})} onEdit={e=>setModal({type:"eng",data:e})} onDelete={deleteEng}/>}
         {page==="jobcards"    &&<JobCardsModule    atms={atms} engineers={engineers} banks={banks}/>}
+        {page==="calls"       &&<CallsModule       atms={rawAtms||[]} engineers={engineers} banks={banks}/>}
       </main>
 
       {/* ── MOBILE BOTTOM NAV ── */}
@@ -1144,6 +1313,7 @@ export default function App(props: PageProps) {
         {navItems.map(n=>{const active=page===n.id;return(
           <button key={n.id} onClick={()=>navigate(n.id)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,padding:"10px 4px 12px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"inherit",position:"relative"}}>
             {active&&<span style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:32,height:3,borderRadius:"0 0 3px 3px",background:C.accent}}/>}
+            {navBadge(n.id)&&<span style={{position:"absolute",top:6,right:"calc(50% - 16px)",background:"#ef4444",color:"#fff",borderRadius:10,fontSize:8,fontWeight:800,minWidth:14,height:14,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 2px",lineHeight:1}}>{navBadge(n.id)}</span>}
             <span style={{fontSize:18,lineHeight:1}}>{n.icon}</span>
             <span style={{fontSize:10,fontWeight:active?700:500,color:active?C.accent:C.textMuted,lineHeight:1}}>{n.label}</span>
           </button>
@@ -1154,7 +1324,7 @@ export default function App(props: PageProps) {
       {modal?.type==="bank"  &&<Modal title={modal.data?"Edit Bank":"Add Bank"} onClose={closeModal} width={560}><BankForm initial={modal.data} onSave={saveBank} onClose={closeModal}/></Modal>}
       {modal?.type==="atm"   &&<Modal title={modal.data?"Edit ATM":"Add ATM to Fleet"} onClose={closeModal} width={600}><AtmForm initial={modal.data} engineers={engineers} banks={banks} onSave={saveAtm} onClose={closeModal}/></Modal>}
       {modal?.type==="maint" &&<Modal title={modal.data?"Edit Maintenance Record":"Log Maintenance"} onClose={closeModal} width={600}><MaintForm initial={modal.data} atms={atms} engineers={engineers} banks={banks} onSave={saveMaint} onClose={closeModal}/></Modal>}
-      {modal?.type==="eng"   &&<Modal title={modal.data?"Edit Engineer":"Add Engineer"} onClose={closeModal} width={480}><EngForm initial={modal.data} onSave={saveEng} onClose={closeModal}/></Modal>}
+      {modal?.type==="eng"   &&<Modal title={modal.data?"Edit Engineer":"Add Engineer"} onClose={closeModal} width={540}><EngForm initial={modal.data} onSave={saveEng} onClose={closeModal}/></Modal>}
       {bulkModal?.type==="bulkPM"&&<Modal title="⚡ Bulk Maintenance Log" subtitle="Log preventive maintenance for multiple ATMs at once" onClose={closeBulk} width={740}><BulkPMWizard atms={atms} engineers={engineers} banks={banks} onSave={handleBulkPM} onClose={closeBulk}/></Modal>}
       {bulkModal?.type==="bulkStatus"&&<BulkStatusModal atms={bulkModal.atms} onSave={ns=>handleBulkStatus(bulkModal.atms,ns)} onClose={closeBulk}/>}
       {bulkModal?.type==="bulkReassign"&&<BulkReassignModal atms={bulkModal.atms} engineers={engineers} onSave={eid=>handleBulkReassign(bulkModal.atms,eid)} onClose={closeBulk}/>}

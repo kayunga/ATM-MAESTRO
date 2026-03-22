@@ -49,6 +49,23 @@ Route::middleware(['auth', 'admin'])->group(function () {
     Route::post('/job-cards/bulk-download',      [JobCardDownloadController::class, 'bulk'])->name('job-cards.bulk-download');
 });
 
+// ── Calls (admin CRUD) ───────────────────────────────────────────────────────
+Route::middleware(['auth', 'admin'])->group(function () {
+    Route::get ('/calls',        [\App\Http\Controllers\CallController::class, 'index'])->name('calls.index');
+    Route::post('/calls',        [\App\Http\Controllers\CallController::class, 'store'])->name('calls.store');
+    Route::put ('/calls/{call}', [\App\Http\Controllers\CallController::class, 'update'])->name('calls.update');
+    Route::delete('/calls/{call}', [\App\Http\Controllers\CallController::class, 'destroy'])->name('calls.destroy');
+});
+
+// ── Calls (engineer portal) ───────────────────────────────────────────────────
+Route::middleware('auth')->group(function () {
+    Route::get ('/engineer/calls',                  [\App\Http\Controllers\EngineerCallController::class, 'index'])->name('engineer.calls.index');
+    Route::post('/engineer/calls/{call}/assign',    [\App\Http\Controllers\EngineerCallController::class, 'assign'])->name('engineer.calls.assign');
+    Route::post('/engineer/calls/{call}/return',    [\App\Http\Controllers\EngineerCallController::class, 'returnCall'])->name('engineer.calls.return');
+    Route::post('/engineer/calls/{call}/note',      [\App\Http\Controllers\EngineerCallController::class, 'saveNote'])->name('engineer.calls.note');
+    Route::post('/engineer/calls/{call}/close',     [\App\Http\Controllers\EngineerCallController::class, 'close'])->name('engineer.calls.close');
+});
+
 // ── Shared download route (admin + elevated engineers) ────────────────────────
 Route::middleware('auth')->get(
     '/job-cards/{jobCard}/files/{index}',

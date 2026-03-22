@@ -23,7 +23,7 @@ class CreateEngineerUsers extends Command
 
         foreach ($engineers as $engineer) {
             $email = $engineer->email
-                ?? strtolower(str_replace(' ', '.', $engineer->name)) . '@techmasters.zm';
+                ?? strtolower(str_replace(' ', '.', $engineer->name)) . '@test.com';
 
             if (User::where('email', $email)->exists()) {
                 $this->warn("Skipping {$engineer->name} — email {$email} already exists.");
@@ -33,12 +33,12 @@ class CreateEngineerUsers extends Command
             $user = User::create([
                 'name'     => $engineer->name,
                 'email'    => $email,
-                'password' => Hash::make('Techmaster@2026'),
+                'password' => Hash::make('Test@2026'),
             ]);
 
             $engineer->update(['user_id' => $user->id]);
 
-            $this->info("✓ {$engineer->name} → {$email} (password: Techmaster@2026)");
+            $this->info("✓ {$engineer->name} → {$email} (password: Test@2026)");
         }
 
         $this->info('Done.');

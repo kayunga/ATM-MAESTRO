@@ -31,7 +31,16 @@ class AtmFleetController extends Controller
                 ->orderBy('name')
                 ->get(),
 
-            'engineers' => Engineer::orderBy('name')->get(),
+            'engineers' => Engineer::orderBy('name')
+                ->get()
+                ->map(fn($e) => [
+                    'id'      => $e->id,
+                    'name'    => $e->name,
+                    'phone'   => $e->phone,
+                    'email'   => $e->email,
+                    'region'  => $e->region,
+                    'user_id' => $e->user_id,
+                ]),
 
             'maintenance' => MaintenanceRecord::with(['atm', 'engineer'])
                 ->orderByDesc('scheduled_date')

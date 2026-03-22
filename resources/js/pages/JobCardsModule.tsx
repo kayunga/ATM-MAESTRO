@@ -270,7 +270,7 @@ export default function JobCardsModule({ atms, engineers, banks }) {
     setLoading(true);
     try {
       const res = await fetch(`/job-cards/data?status=${filter}`, {
-        headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest", "X-CSRF-TOKEN": (document.querySelector('meta[name="csrf-token"]') as any)?.content ?? "" },
+        headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
         credentials: "same-origin",
       });
       const data = await res.json();
@@ -284,8 +284,13 @@ export default function JobCardsModule({ atms, engineers, banks }) {
 
   useEffect(() => { load(); }, [filter]);
 
-  const getCSRF = () =>
-    (document.querySelector('meta[name="csrf-token"]') as any)?.content ?? "";
+  const getCSRF = () => {
+    // Read XSRF-TOKEN cookie that Laravel sets automatically
+    const match = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
+    if (match) return decodeURIComponent(match[1]);
+    // Fallback to meta tag
+    return (document.querySelector('meta[name="csrf-token"]') as any)?.content ?? "";
+  };
 
   const approve = useCallback(async (card: JobCard) => {
     try {
@@ -294,7 +299,7 @@ export default function JobCardsModule({ atms, engineers, banks }) {
         headers: {
           Accept: "application/json",
           "X-Requested-With": "XMLHttpRequest",
-          "X-CSRF-TOKEN": getCSRF(),
+          "X-XSRF-TOKEN": getCSRF(),
         },
         credentials: "same-origin",
       });
@@ -318,7 +323,7 @@ export default function JobCardsModule({ atms, engineers, banks }) {
           Accept: "application/json",
           "Content-Type": "application/json",
           "X-Requested-With": "XMLHttpRequest",
-          "X-CSRF-TOKEN": getCSRF(),
+          "X-XSRF-TOKEN": getCSRF(),
         },
         credentials: "same-origin",
         body: JSON.stringify({ reason }),

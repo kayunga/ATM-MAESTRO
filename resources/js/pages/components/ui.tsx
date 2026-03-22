@@ -43,7 +43,8 @@ export const Input = ({ label, value, onChange, placeholder, type = "text", requ
     ) : rows ? (
       <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} rows={rows} className="field-control field-textarea"/>
     ) : (
-      <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} required={required} className="field-control"/>
+      <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} required={required} className="field-control"
+        style={type==="date"?{colorScheme:"light",cursor:"pointer"}:undefined}/>
     )}
   </div>
 );
@@ -88,9 +89,9 @@ export const StatCard = ({ label, value, sub, color = C.accent, icon }: StatCard
 );
 
 // ─── EmptyState ───────────────────────────────────────────────────────────────
-export const EmptyState = ({ message }: { message: string }) => (
+export const EmptyState = ({ message, icon = "📭" }: { message: string; icon?: string }) => (
   <div className="empty-state">
-    <div className="empty-state__icon">📭</div>
+    <div className="empty-state__icon">{icon}</div>
     <div className="empty-state__msg">{message}</div>
   </div>
 );
