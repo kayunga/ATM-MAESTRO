@@ -31,7 +31,7 @@ class EngineerCallController extends Controller
 
         $calls = Call::with(['atm.bank', 'engineer', 'jobCards'])
             ->whereNotIn('status', ['resolved'])
-            ->orderByRaw("FIELD(priority,'high','medium','low')")
+            ->orderByRaw("CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END")
             ->orderByDesc('created_at')
             ->get()
             ->map(fn($c) => $this->format($c));

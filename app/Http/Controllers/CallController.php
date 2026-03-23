@@ -43,8 +43,8 @@ class CallController extends Controller
             ->when($dateTo,               fn($q) => $q->whereDate('created_at', '<=', $dateTo))
             ->when($engineerId,           fn($q) => $q->where('assigned_engineer_id', $engineerId))
             ->with(['atm.bank', 'engineer', 'assignedBy', 'jobCards'])
-            ->orderByRaw("FIELD(priority,'high','medium','low')")
-            ->orderByRaw("FIELD(status,'escalated','pending','assigned','on_hold','resolved')")
+            ->orderByRaw("CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END")
+            ->orderByRaw("CASE status WHEN 'escalated' THEN 1 WHEN 'pending' THEN 2 WHEN 'assigned' THEN 3 WHEN 'on_hold' THEN 4 WHEN 'resolved' THEN 5 ELSE 6 END")
             ->orderByDesc('created_at')
             ->get()
             ->map(fn($c) => $this->format($c));

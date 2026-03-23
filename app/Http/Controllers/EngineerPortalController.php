@@ -34,22 +34,6 @@ class EngineerPortalController extends Controller
         $user     = Auth::user();
         $engineer = Engineer::where('user_id', $user->id)->first();
 
-        // ── DEBUG — remove after fixing ───────────────────────────────────────
-        // dd([
-        //     'user_id'          => $user->id,
-        //     'user_email'       => $user->email,
-        //     'user_is_admin'    => $user->is_admin,
-        //     'engineer_found'   => $engineer ? true : false,
-        //     'engineer_id'      => $engineer?->id,
-        //     'engineer_name'    => $engineer?->name,
-        //     'engineer_user_id' => $engineer?->user_id,
-        //     // Cross-check: find engineer by email to see if link is the problem
-        //     'engineer_by_email' => Engineer::where('email', $user->email)->first()?->only(['id','name','user_id']),
-        //     // Show all engineers and their user_ids
-        //     'all_engineers_user_ids' => Engineer::pluck('user_id', 'name'),
-        // ]);
-        // ── END DEBUG ─────────────────────────────────────────────────────────
-
         // Admin (or elevated engineer with admin flag) → admin dashboard
         if ($user->is_admin) {
             return redirect()->intended(route('atm.fleet'));
@@ -117,6 +101,12 @@ class EngineerPortalController extends Controller
         $currentYear    = now()->year;
         $currentQuarter = (int) ceil(now()->month / 3);
 
+        // Pre-load all current-quarter job cards keyed by atm_id to avoid N+1
+        $jobCardsByAtm = JobCard::where('engineer_id', $engineer->id)
+            ->where('quarter', $currentQuarter)
+            ->where('year', $currentYear)
+            ->pluck('id', 'atm_id');
+
         $pmRecords = MaintenanceRecord::where('engineer_id', $engineer->id)
             ->where('quarter', $currentQuarter)
             ->where('year', $currentYear)
@@ -143,11 +133,7 @@ class EngineerPortalController extends Controller
                         'short_code' => $m->atm->bank->short_code,
                     ],
                 ],
-                'job_card_id' => JobCard::where('engineer_id', $engineer->id)
-                    ->where('atm_id', $m->atm_id)
-                    ->where('quarter', $currentQuarter)
-                    ->where('year', $currentYear)
-                    ->value('id'),
+                'job_card_id' => $jobCardsByAtm[$m->atm_id] ?? null,
             ]);
 
         $jobCards = JobCard::where('engineer_id', $engineer->id)
