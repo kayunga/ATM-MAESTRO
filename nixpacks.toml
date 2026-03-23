@@ -1,10 +1,10 @@
 [phases.setup]
-nixPkgs = ["php83", "php83Packages.composer", "nodejs_20"]
+nixPkgs = ["php83", "php83Packages.composer", "php83Extensions.pdo_pgsql", "php83Extensions.pgsql", "php83Extensions.mbstring", "php83Extensions.xml", "php83Extensions.curl", "php83Extensions.zip", "nodejs_20"]
 
 [phases.install]
 cmds = [
-  "composer install --optimize-autoloader --no-scripts --no-interaction",
-  "npm ci"
+  "composer install --optimize-autoloader --no-dev --no-scripts --no-interaction",
+  "npm ci --include=dev"
 ]
 
 [phases.build]
@@ -16,4 +16,4 @@ cmds = [
 ]
 
 [start]
-cmd = "php artisan serve --host=0.0.0.0 --port=$PORT"
+cmd = "php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=$PORT"
