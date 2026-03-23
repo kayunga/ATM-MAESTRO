@@ -3,7 +3,6 @@ FROM php:8.3-cli
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     git curl zip unzip libpq-dev libzip-dev libxml2-dev libonig-dev \
-    nodejs npm \
     && docker-php-ext-install pdo pdo_pgsql pgsql mbstring xml zip \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -20,21 +19,21 @@ WORKDIR /app
 COPY composer.json composer.lock ./
 RUN composer install --optimize-autoloader --no-dev --no-scripts --no-interaction
 
-# Copy package files
+# Copy package files and install
 COPY package.json package-lock.json ./
 RUN npm ci --include=dev
 
 # Copy rest of application
 COPY . .
 
-# Build frontend assets
+# Build frontend assets only — NO config:cache here
 RUN npm run build
-
-# Cache Laravel config
-RUN php artisan config:cache || true
-RUN php artisan route:cache || true
-RUN php artisan view:cache || true
 
 EXPOSE $PORT
 
-CMD php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=$PORT
+# At runtime: clear any stale cache, then cache fresh with real env vars, migrate, serve
+CMD php artisan config:clear && \
+    php artisan config:cache && \
+    php artisan route:cache && \
+    php artisan migrate --force && \
+    php artisan serve --host=0.0.0.0 --port=$PORT
