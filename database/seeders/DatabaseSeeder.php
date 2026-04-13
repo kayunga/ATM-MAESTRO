@@ -18,7 +18,16 @@ class DatabaseSeeder extends Seeder
             ['name' => 'Bwalya Mutale', 'phone' => '+260 96 234 5678', 'email' => 'b.mutale@ncrservice.zm', 'region' => 'Copperbelt'],
             ['name' => 'Chanda Phiri',  'phone' => '+260 95 345 6789', 'email' => 'c.phiri@ncrservice.zm',  'region' => 'Southern'],
             ['name' => 'Mulenga Banda', 'phone' => '+260 97 456 7890', 'email' => 'm.banda@ncrservice.zm',  'region' => 'Lusaka'],
-        ])->map(fn($e) => Engineer::create($e));
+        ])->map(function($e) {
+            $user = \App\Models\User::create([
+                'name' => $e['name'],
+                'email' => $e['email'],
+                'password' => \Illuminate\Support\Facades\Hash::make('password123'),
+                'is_admin' => false,
+            ]);
+            $e['user_id'] = $user->id;
+            return Engineer::create($e);
+        });
 
         [$tendai, $bwalya, $chanda, $mulenga] = $engineers;
 

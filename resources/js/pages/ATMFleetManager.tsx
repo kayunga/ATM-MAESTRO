@@ -170,6 +170,50 @@ async function exportMaintenancePDF(
   }
 }
 
+// ─── Change Password Modal ──────────────────────────────────────────────────────
+const ChangePasswordModal = ({ onClose }: any) => {
+  const [form, setForm] = useState({ current_password: "", password: "", password_confirmation: "" });
+  const [errors, setErrors] = useState<any>({});
+  const [saving, setSaving] = useState(false);
+
+  const submit = () => {
+    setSaving(true);
+    router.put("/user/password", form, {
+      onSuccess: () => {
+        alert("Password updated successfully!");
+        onClose();
+      },
+      onError: (err) => {
+        setErrors(err);
+        setSaving(false);
+      },
+      onFinish: () => setSaving(false)
+    });
+  };
+
+  return (
+    <Modal title="Change Password" onClose={onClose} width={400}>
+      <div style={{ display:"flex", flexDirection:"column", gap: 16 }}>
+        <div>
+          <Input label="Current Password" type="password" value={form.current_password} onChange={(v:string)=>setForm({...form, current_password: v})} required />
+          {errors.current_password && <div style={{ fontSize: 11, color: C.red, marginTop: 4 }}>{errors.current_password}</div>}
+        </div>
+        <div>
+          <Input label="New Password" type="password" value={form.password} onChange={(v:string)=>setForm({...form, password: v})} required />
+          {errors.password && <div style={{ fontSize: 11, color: C.red, marginTop: 4 }}>{errors.password}</div>}
+        </div>
+        <div>
+          <Input label="Confirm New Password" type="password" value={form.password_confirmation} onChange={(v:string)=>setForm({...form, password_confirmation: v})} required />
+        </div>
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop: 8 }}>
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn onClick={submit} disabled={saving}>{saving ? "Saving..." : "Change Password"}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
 // ─── Bulk PM Wizard (3-step) ──────────────────────────────────────────────────
 const BulkPMWizard = ({atms,engineers,banks,onSave,onClose}) => {
   const cQ=qtr(today), cY=today.getFullYear();
@@ -1152,6 +1196,7 @@ export default function App(props: PageProps) {
   const navBadge = (id:string) => id==="calls"&&pendingCalls>0 ? pendingCalls : null;
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [passModalOpen, setPassModalOpen] = useState(false);
   const navigate = (id) => { setPage(id); setDrawerOpen(false); };
 
   // Auth user from Inertia shared props
@@ -1219,6 +1264,9 @@ export default function App(props: PageProps) {
                   </div>
                 </div>
                 <div style={{padding:8}}>
+                  <button onClick={() => { setProfileOpen(false); setPassModalOpen(true); }} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:8,border:"none",background:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:C.textMid}}>
+                    <span>🔑</span> Change Password
+                  </button>
                   <button onClick={handleLogout} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:8,border:"none",background:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:C.danger}}>
                     <span>🚪</span> Sign Out
                   </button>
@@ -1281,6 +1329,9 @@ export default function App(props: PageProps) {
               <div style={{fontSize:11,color:C.textMuted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{authUser?.email??""}</div>
             </div>
           </div>
+          <button onClick={() => { setDrawerOpen(false); setPassModalOpen(true); }} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"9px 14px",borderRadius:10,border:`1px solid ${C.border}`,background:"#fff",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:C.textMid,marginBottom:8}}>
+            🔑 Change Password
+          </button>
           <button onClick={handleLogout} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"9px 14px",borderRadius:10,border:`1px solid ${C.border}`,background:"#fff",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:C.danger}}>
             🚪 Sign Out
           </button>
@@ -1331,6 +1382,7 @@ export default function App(props: PageProps) {
       {bulkModal?.type==="bulkDelete"&&<BulkDeleteModal atms={bulkModal.atms} onConfirm={()=>handleBulkDelete(bulkModal.atms)} onClose={closeBulk}/>}
       {viewAtm&&<AtmDetail atm={viewAtm} engineers={engineers} banks={banks} maintenance={maintenance} onClose={()=>setViewAtm(null)} onAddMaint={()=>{ setViewAtm(null); setModal({type:"maint",data:{...defaultMaint,atmId:viewAtm.id,engineerId:viewAtm.engineerId}}); }}/>}
       {confirm&&<Confirm message={confirm.message} onConfirm={confirm.onConfirm} onCancel={()=>setConfirm(null)}/>}
+      {passModalOpen&&<ChangePasswordModal onClose={()=>setPassModalOpen(false)}/>}
       <ToastContainer/>
     </div>
   );

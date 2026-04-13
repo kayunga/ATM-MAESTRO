@@ -160,6 +160,54 @@ const Modal = ({title,subtitle,onClose,children}:any) => (
   </div>
 );
 
+// ─── Change Password Modal ──────────────────────────────────────────────────────
+const ChangePasswordModal = ({ onClose }: any) => {
+  const [form, setForm] = useState({ current_password: "", password: "", password_confirmation: "" });
+  const [errors, setErrors] = useState<any>({});
+  const [saving, setSaving] = useState(false);
+
+  const submit = (e: any) => {
+    e.preventDefault();
+    setSaving(true);
+    router.put("/user/password", form, {
+      onSuccess: () => {
+        alert("Password updated successfully!");
+        onClose();
+      },
+      onError: (err) => {
+        setErrors(err);
+        setSaving(false);
+      },
+      onFinish: () => setSaving(false)
+    });
+  };
+
+  return (
+    <Modal title="Change Password" onClose={onClose} width={400}>
+      <form onSubmit={submit} style={{ display:"flex", flexDirection:"column", gap: 16 }}>
+        <div>
+          <label style={labelStyle}>Current Password <span style={{color:C.danger}}>*</span></label>
+          <input type="password" value={form.current_password} onChange={e=>setForm({...form, current_password: e.target.value})} style={{...inputStyle, borderColor: errors.current_password ? C.danger : C.border}} required />
+          {errors.current_password && <div style={{ fontSize: 11, color: C.danger, marginTop: 4 }}>{errors.current_password}</div>}
+        </div>
+        <div>
+          <label style={labelStyle}>New Password <span style={{color:C.danger}}>*</span></label>
+          <input type="password" value={form.password} onChange={e=>setForm({...form, password: e.target.value})} style={{...inputStyle, borderColor: errors.password ? C.danger : C.border}} required />
+          {errors.password && <div style={{ fontSize: 11, color: C.danger, marginTop: 4 }}>{errors.password}</div>}
+        </div>
+        <div>
+          <label style={labelStyle}>Confirm New Password <span style={{color:C.danger}}>*</span></label>
+          <input type="password" value={form.password_confirmation} onChange={e=>setForm({...form, password_confirmation: e.target.value})} style={{...inputStyle}} required />
+        </div>
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop: 8 }}>
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn type="submit" disabled={saving}>{saving ? "Saving..." : "Change Password"}</Btn>
+        </div>
+      </form>
+    </Modal>
+  );
+};
+
 // ─── File Upload ──────────────────────────────────────────────────────────────
 const FileUpload = ({files,onChange}:{files:File[];onChange:(f:File[])=>void}) => {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -737,7 +785,7 @@ const CardsTab = ({jobCards,onView}:any) => {
 };
 
 // ─── Tab: Profile ─────────────────────────────────────────────────────────────
-const ProfileTab = ({engineer}:any) => {
+const ProfileTab = ({engineer, onPassClick}:any) => {
   const handleLogout = () => {
     if (confirm("Sign out?")) router.post("/logout");
   };
@@ -775,6 +823,12 @@ const ProfileTab = ({engineer}:any) => {
         ))}
       </div>
 
+      <button onClick={onPassClick} style={{
+        width:"100%",padding:"14px",borderRadius:14,border:`1px solid ${C.border}`,
+        background:C.white,color:C.textMid,fontWeight:700,fontSize:15,
+        fontFamily:"inherit",cursor:"pointer",marginBottom:12}}>
+        🔑 Change Password
+      </button>
       <button onClick={handleLogout} style={{
         width:"100%",padding:"14px",borderRadius:14,border:"1px solid #fecaca",
         background:C.dangerLight,color:C.danger,fontWeight:700,fontSize:15,
@@ -1344,6 +1398,7 @@ const Dashboard = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear,
   const [tab,setTab]           = useState("home");
   const [modal,setModal]           = useState<null|"detail"|"drawer">(null);
   const [profileOpen,setProfileOpen] = useState(false);
+  const [passModalOpen,setPassModalOpen] = useState(false);
   const [detailCard,setDetail]     = useState<JobCard|null>(null);
   const [toasts,setToasts]     = useState<any[]>([]);
   const [logAtmId,setLogAtmId] = useState<number|null>(null);
@@ -1492,6 +1547,12 @@ const Dashboard = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear,
                         ))}
                       </div>
                       <div style={{borderTop:`1px solid ${C.border}`,padding:8}}>
+                        <button onClick={()=>{setProfileOpen(false); setPassModalOpen(true);}}
+                          style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",
+                            borderRadius:8,border:"none",background:"none",cursor:"pointer",
+                            fontFamily:"inherit",fontSize:13,fontWeight:600,color:C.textMid}}>
+                          <span>🔑</span> Change Password
+                        </button>
                         <button onClick={()=>{if(confirm("Sign out?"))router.post("/logout");}}
                           style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",
                             borderRadius:8,border:"none",background:"none",cursor:"pointer",
@@ -1634,7 +1695,7 @@ const Dashboard = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear,
           {tab==="pm"      && <PMTab      pmRecords={pmRecords} currentQuarter={currentQuarter} currentYear={currentYear} onLogJobCard={openLog}/>}
           {tab==="log"     && <LogTab     atms={atms} onSave={(submitted:boolean)=>{ addToast(submitted?"Submitted for review!":"Saved as draft.","success"); router.reload(); setTab("cards"); }}/>}
           {tab==="cards"   && <CardsTab   jobCards={jobCards} onView={(c:JobCard)=>{setDetail(c);setModal("detail");}}/>}
-          {tab==="profile" && <ProfileTab engineer={engineer}/>}
+          {tab==="profile" && <ProfileTab engineer={engineer} onPassClick={()=>setPassModalOpen(true)}/>}
           {tab==="calls"   && <CallsTab atms={atms} engineer={engineer} addToast={addToast}/>}
         </div>
 
@@ -1704,6 +1765,9 @@ const Dashboard = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear,
             />
           </Modal>
         )}
+        
+        {/* ── CHANGE PASSWORD MODAL ── */}
+        {passModalOpen&&<ChangePasswordModal onClose={()=>setPassModalOpen(false)}/>}
       </div>
     </>
   );

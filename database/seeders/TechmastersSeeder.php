@@ -11,14 +11,14 @@ class TechmastersSeeder extends Seeder
 {
     public function run(): void
     {
-        DB::statement('SET session_replication_role = replica;');
+        \Illuminate\Support\Facades\Schema::disableForeignKeyConstraints();
         DB::table('maintenance_records')->truncate();
         DB::table('atms')->truncate();
         DB::table('engineers')->truncate();
         DB::table('banks')->truncate();
         // Remove any existing engineer portal user accounts (non-admin)
         DB::table('users')->where('is_admin', false)->delete();
-        DB::statement('SET session_replication_role = DEFAULT;');
+        \Illuminate\Support\Facades\Schema::enableForeignKeyConstraints();
 
         $now = Carbon::now();
 

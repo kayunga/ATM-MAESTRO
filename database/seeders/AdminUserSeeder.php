@@ -22,7 +22,7 @@ class AdminUserSeeder extends Seeder
 
         $this->command->info('✓ Admin user created:');
         $this->command->info('  Email:    admin@techmasters.zm');
-        $this->command->info('  Password: admin123');
+        $this->command->info('  Password: Admin@123');
         $this->command->info('  ⚠  Change this password after first login!');
     }
 }

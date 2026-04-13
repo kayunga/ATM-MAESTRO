@@ -17,7 +17,10 @@ Route::middleware('guest')->group(function () {
     Route::get ('/login', fn() => inertia('auth/login'))->name('login');
     Route::post('/login', [EngineerPortalController::class, 'login'])->name('login.store');
 });
-Route::middleware('auth')->post('/logout', [EngineerPortalController::class, 'logout'])->name('logout');
+Route::middleware('auth')->group(function () {
+    Route::post('/logout', [EngineerPortalController::class, 'logout'])->name('logout');
+    Route::put('/user/password', [\App\Http\Controllers\PasswordController::class, 'update'])->name('password.update');
+});
 
 // ── Admin SPA ─────────────────────────────────────────────────────────────────
 Route::middleware(['auth', 'admin'])->group(function () {
