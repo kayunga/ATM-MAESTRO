@@ -1,6 +1,0 @@
-# Optional - only if you prefer Docker over a native Postgres install.
-services:
-  db:
-    image: postgres:16
-    environment: { POSTGRES_USER: jobcards, POSTGRES_PASSWORD: jobcards, POSTGRES_DB: jobcards }
-    ports: ["5432:5432"]
