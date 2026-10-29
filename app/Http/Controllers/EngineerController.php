@@ -17,6 +17,7 @@ class EngineerController extends Controller
             'phone'  => 'nullable|string|max:50',
             'email'  => 'nullable|email|max:255',
             'region' => 'required|string|max:255',
+            'signature' => ['nullable', 'string', 'max:500000', 'regex:/\Adata:image\/png;base64,[A-Za-z0-9+\/]+=*\z/'],
         ];
 
         if ($request->boolean('create_login')) {
@@ -33,6 +34,7 @@ class EngineerController extends Controller
                 'phone'  => $validated['phone']  ?? null,
                 'email'  => $validated['email']  ?? null,
                 'region' => $validated['region'],
+                'signature' => $validated['signature'] ?? null,
             ]);
 
             if ($request->boolean('create_login')) {
@@ -55,6 +57,7 @@ class EngineerController extends Controller
             'phone'  => 'nullable|string|max:50',
             'email'  => 'nullable|email|max:255',
             'region' => 'required|string|max:255',
+            'signature' => ['nullable', 'string', 'max:500000', 'regex:/\Adata:image\/png;base64,[A-Za-z0-9+\/]+=*\z/'],
         ];
 
         if ($request->boolean('create_login')) {
@@ -71,6 +74,7 @@ class EngineerController extends Controller
                 'phone'  => $validated['phone']  ?? null,
                 'email'  => $validated['email']  ?? null,
                 'region' => $validated['region'],
+                'signature' => $validated['signature'] ?? null,
             ]);
 
             if ($request->boolean('revoke_login') && $engineer->user_id) {

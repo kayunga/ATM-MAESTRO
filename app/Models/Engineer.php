@@ -17,6 +17,7 @@ class Engineer extends Model
         'phone',
         'email',
         'region',
+        'signature',
         'user_id',
     ];
 

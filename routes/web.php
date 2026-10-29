@@ -31,6 +31,7 @@ Route::middleware(['auth', 'admin'])->group(function () {
     Route::delete('/banks/{bank}', [BankController::class, 'destroy']);
 
     Route::post('/atms/bulk-status',   [AtmController::class, 'bulkStatus']);
+    Route::post('/atms/bulk-gbna',     [AtmController::class, 'bulkGbna']);
     Route::post('/atms/bulk-reassign', [AtmController::class, 'bulkReassign']);
     Route::post('/atms/bulk-delete',   [AtmController::class, 'bulkDelete']);
     Route::post('/atms',               [AtmController::class, 'store']);
@@ -71,6 +72,10 @@ Route::middleware('auth')->group(function () {
 
 // ── Shared download route (admin + elevated engineers) ────────────────────────
 Route::middleware('auth')->get(
+    '/job-cards/{jobCard}/print',
+    [JobCardDownloadController::class, 'printCard']
+)->name('job-cards.print');
+Route::middleware('auth')->get(
     '/job-cards/{jobCard}/files/{index}',
     [JobCardDownloadController::class, 'singleFile']
 )->name('job-cards.file');
@@ -78,6 +83,7 @@ Route::middleware('auth')->get(
 // ── Engineer Portal ───────────────────────────────────────────────────────────
 Route::middleware('auth')->group(function () {
     Route::get('/engineer', [EngineerPortalController::class, 'index'])->name('engineer.portal');
+    Route::put('/engineer/signature', [EngineerPortalController::class, 'updateSignature'])->name('engineer.signature.update');
     Route::post('/engineer/job-cards',                  [EngineerPortalController::class, 'storeJobCard'])->name('engineer.job-cards.store');
     Route::post('/engineer/job-cards/{jobCard}/submit', [EngineerPortalController::class, 'submitJobCard'])->name('engineer.job-cards.submit');
     Route::delete('/engineer/job-cards/{jobCard}',      [EngineerPortalController::class, 'destroyJobCard'])->name('engineer.job-cards.destroy');

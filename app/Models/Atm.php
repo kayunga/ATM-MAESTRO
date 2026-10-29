@@ -23,12 +23,14 @@ class Atm extends Model
         'bank_id',
         'engineer_id',
         'status',
+        'has_gbna',
         'install_date',
         'notes',
     ];
 
     protected $casts = [
         'install_date' => 'date',
+        'has_gbna' => 'boolean',
     ];
 
     // ── Relationships ─────────────────────────────────────────────────────────

@@ -2,6 +2,8 @@
 /* eslint-disable */
 import { useState, useEffect, useCallback } from "react";
 import CallsAnalytics from "./CallsAnalytics";
+import { addCompanyLogo } from "./helpers";
+import "./calls-ui.css";
 
 // ─── PDF Export ──────────────────────────────────────────────────────────────
 async function loadJsPDF() {
@@ -28,6 +30,7 @@ async function exportCallsPDF(calls: any[], filters: any, onError: (m:string)=>v
     const doc   = new JsPDF({ orientation:"landscape", unit:"mm", format:"a4" });
     const W     = 297;
     const now   = new Date().toLocaleString("en-GB");
+    await addCompanyLogo(doc);
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
     const ri = (n:number) => Math.round(n);
@@ -49,13 +52,11 @@ async function exportCallsPDF(calls: any[], filters: any, onError: (m:string)=>v
     };
 
     // ─── Header ───────────────────────────────────────────────────────────────
-    doc.setFillColor(29,110,245);
-    doc.rect(0,0,W,20,"F");
-    doc.setTextColor(255,255,255);
+    doc.setTextColor(26,29,35);
     doc.setFontSize(13); doc.setFont("helvetica","bold");
-    doc.text("NCR Fleet — Calls Report", 14, 8);
-    doc.setFontSize(8); doc.setFont("helvetica","normal");
-    doc.text(`Generated: ${now}   ·   Total: ${calls.length} calls`, 14, 15);
+    doc.text("Calls Report", 104, 8);
+    doc.setFontSize(7.5); doc.setFont("helvetica","normal");
+    doc.text(`Generated: ${now}   ·   Total: ${calls.length} calls`, 104, 15);
     doc.setFontSize(10); doc.setFont("helvetica","bold");
     doc.text(filters.periodLabel ?? "Custom Period", W-14, 8, {align:"right"});
     doc.setFontSize(8); doc.setFont("helvetica","normal");
@@ -205,7 +206,7 @@ async function exportCallsPDF(calls: any[], filters: any, onError: (m:string)=>v
     for (let p=1; p<=pages; p++) {
       doc.setPage(p);
       doc.setFontSize(7); doc.setTextColor(150,150,150);
-      doc.text(`NCR Fleet · Techmasters Zambia · Page ${p} of ${pages}`, W/2, 204, {align:"center"});
+      doc.text(`Techmasters Zambia · Page ${p} of ${pages}`, W/2, 204, {align:"center"});
     }
 
     const slug = (filters.periodLabel??"custom").replace(/\s+/g,"-").toLowerCase();
@@ -346,6 +347,11 @@ const Badge = ({cfg}:{cfg:any}) => (
 
 // ─── New / Edit Call Modal ────────────────────────────────────────────────────
 const CallForm = ({atms,engineers,banks,initial,onSave,onClose}:any) => {
+  const atmLabel=(atm:any)=>{
+    const bank=(banks||[]).find((item:any)=>item.id===(atm.bankId??atm.bank_id));
+    return `${atm.terminalId??atm.terminal_id} · ${atm.location} (${bank?.shortCode??bank?.short_code??""})`;
+  };
+  const initialAtm=(atms||[]).find((atm:any)=>String(atm.id)===String(initial?.atm?.id));
   const [form,setForm] = useState({
     atm_id:             initial?.atm?.id ?? "",
     call_type:          initial?.call_type ?? "new",
@@ -354,8 +360,14 @@ const CallForm = ({atms,engineers,banks,initial,onSave,onClose}:any) => {
     notes:              initial?.notes ?? "",
     assigned_engineer_id: initial?.engineer?.id ?? "",
   });
+  const [atmSearch,setAtmSearch]=useState(initialAtm?atmLabel(initialAtm):"");
   const [saving,setSaving] = useState(false);
   const set = (k:string)=>(v:any)=>setForm(f=>({...f,[k]:v}));
+  const handleAtmSearch=(value:string)=>{
+    setAtmSearch(value);
+    const match=(atms||[]).find((atm:any)=>atmLabel(atm).toLocaleLowerCase()===value.trim().toLocaleLowerCase());
+    set("atm_id")(match?.id??"");
+  };
 
   const save = async () => {
     if (!form.atm_id)                   { alert("Please select an ATM."); return; }
@@ -392,13 +404,20 @@ const CallForm = ({atms,engineers,banks,initial,onSave,onClose}:any) => {
         <label style={{fontSize:13,fontWeight:600,color:C.textMid,display:"block",marginBottom:6}}>
           ATM <span style={{color:C.danger}}>*</span>
         </label>
-        <select value={form.atm_id} onChange={e=>set("atm_id")(e.target.value)}
-          style={{...inputStyle,appearance:"none"}} disabled={!!initial}>
-          <option value="">— Select ATM —</option>
-          {atms.map((a:any)=>(
-            <option key={a.id} value={a.id}>{a.terminalId ?? a.terminal_id} · {a.location} ({(banks||[]).find((b:any)=>b.id===(a.bankId??a.bank_id))?.shortCode ?? ""})</option>
-          ))}
-        </select>
+        <input
+          type="search"
+          list="admin-call-atms"
+          value={atmSearch}
+          onChange={event=>handleAtmSearch(event.target.value)}
+          placeholder="Search by ATM ID, location, or bank…"
+          autoComplete="off"
+          style={inputStyle}
+          className="calls-control"
+          disabled={!!initial}
+        />
+        <datalist id="admin-call-atms">
+          {atms.map((atm:any)=><option key={atm.id} value={atmLabel(atm)}/>)}
+        </datalist>
       </div>
 
       {/* Type + Priority */}
@@ -407,7 +426,7 @@ const CallForm = ({atms,engineers,banks,initial,onSave,onClose}:any) => {
           <label style={{fontSize:13,fontWeight:600,color:C.textMid,display:"block",marginBottom:6}}>Call Type</label>
           <div style={{display:"flex",gap:6}}>
             {(["new","old","repeat"] as const).map(t=>(
-              <button key={t} type="button" onClick={()=>set("call_type")(t)} style={{
+              <button key={t} type="button" className={`calls-option-button${form.call_type===t?" is-selected":""}`} onClick={()=>set("call_type")(t)} style={{
                 flex:1,padding:"10px 4px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",
                 border:`1.5px solid ${form.call_type===t?TYPE_CFG[t].color:C.border}`,
                 background:form.call_type===t?TYPE_CFG[t].bg:C.surface,
@@ -421,7 +440,7 @@ const CallForm = ({atms,engineers,banks,initial,onSave,onClose}:any) => {
           <label style={{fontSize:13,fontWeight:600,color:C.textMid,display:"block",marginBottom:6}}>Priority</label>
           <div style={{display:"flex",gap:6}}>
             {(["low","medium","high"] as const).map(p=>(
-              <button key={p} type="button" onClick={()=>set("priority")(p)} style={{
+              <button key={p} type="button" className={`calls-option-button${form.priority===p?" is-selected":""}`} onClick={()=>set("priority")(p)} style={{
                 flex:1,padding:"10px 4px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",
                 border:`1.5px solid ${form.priority===p?PRIORITY_CFG[p].color:C.border}`,
                 background:form.priority===p?PRIORITY_CFG[p].bg:C.surface,
@@ -440,7 +459,7 @@ const CallForm = ({atms,engineers,banks,initial,onSave,onClose}:any) => {
         </label>
         <textarea value={form.fault_description} onChange={e=>set("fault_description")(e.target.value)}
           placeholder="Describe the fault in detail…" rows={4}
-          style={{...inputStyle,resize:"vertical"}}/>
+          style={{...inputStyle,resize:"vertical"}} className="calls-control"/>
       </div>
 
       {/* Assign engineer */}
@@ -449,7 +468,7 @@ const CallForm = ({atms,engineers,banks,initial,onSave,onClose}:any) => {
           Assign Engineer <span style={{color:C.textMuted,fontWeight:400}}>(optional)</span>
         </label>
         <select value={form.assigned_engineer_id} onChange={e=>set("assigned_engineer_id")(e.target.value)}
-          style={{...inputStyle,appearance:"none"}}>
+          style={{...inputStyle,appearance:"none"}} className="calls-control">
           <option value="">— Unassigned —</option>
           {engineers.map((e:any)=>(
             <option key={e.id} value={e.id}>{e.name} · {e.region}</option>
@@ -726,9 +745,9 @@ const ExportModal = ({onClose, engineers}:any) => {
           {/* Period selector */}
           <div>
             <div style={{fontSize:13,fontWeight:600,color:"#4b5260",marginBottom:8}}>Report Period</div>
-            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <div className="calls-report-periods" style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               {PERIODS.map(p=>(
-                <button key={p.id} onClick={()=>{setPeriod(p.id);
+                <button key={p.id} className={`calls-option-button${period===p.id?" is-selected":""}`} onClick={()=>{setPeriod(p.id);
                   if(p.id!=="custom"){const d=getPeriodDates(p.id);setFrom(d.from);setTo(d.to);}
                 }} style={{
                   padding:"8px 14px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",
@@ -750,12 +769,12 @@ const ExportModal = ({onClose, engineers}:any) => {
               <div>
                 <div style={{fontSize:12,fontWeight:600,color:"#4b5260",marginBottom:5}}>From</div>
                 <input type="date" value={customFrom} onChange={e=>setFrom(e.target.value)}
-                  style={{...sel}}/>
+                  style={{...sel}} className="calls-control"/>
               </div>
               <div>
                 <div style={{fontSize:12,fontWeight:600,color:"#4b5260",marginBottom:5}}>To</div>
                 <input type="date" value={customTo} onChange={e=>setTo(e.target.value)}
-                  style={{...sel}}/>
+                  style={{...sel}} className="calls-control"/>
               </div>
             </div>
           )}
@@ -770,7 +789,7 @@ const ExportModal = ({onClose, engineers}:any) => {
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
             <div>
               <div style={{fontSize:12,fontWeight:600,color:"#4b5260",marginBottom:5}}>Status</div>
-              <select value={status} onChange={e=>setStatus(e.target.value)} style={sel}>
+              <select value={status} onChange={e=>setStatus(e.target.value)} style={sel} className="calls-control">
                 <option value="all">All statuses</option>
                 <option value="pending">Pending</option>
                 <option value="assigned">Assigned</option>
@@ -781,7 +800,7 @@ const ExportModal = ({onClose, engineers}:any) => {
             </div>
             <div>
               <div style={{fontSize:12,fontWeight:600,color:"#4b5260",marginBottom:5}}>Priority</div>
-              <select value={priority} onChange={e=>setPriority(e.target.value)} style={sel}>
+              <select value={priority} onChange={e=>setPriority(e.target.value)} style={sel} className="calls-control">
                 <option value="all">All priorities</option>
                 <option value="high">High</option>
                 <option value="medium">Medium</option>
@@ -790,7 +809,7 @@ const ExportModal = ({onClose, engineers}:any) => {
             </div>
             <div>
               <div style={{fontSize:12,fontWeight:600,color:"#4b5260",marginBottom:5}}>Call Type</div>
-              <select value={callType} onChange={e=>setCallType(e.target.value)} style={sel}>
+              <select value={callType} onChange={e=>setCallType(e.target.value)} style={sel} className="calls-control">
                 <option value="all">All types</option>
                 <option value="new">New</option>
                 <option value="old">Old</option>
@@ -799,7 +818,7 @@ const ExportModal = ({onClose, engineers}:any) => {
             </div>
             <div>
               <div style={{fontSize:12,fontWeight:600,color:"#4b5260",marginBottom:5}}>Engineer</div>
-              <select value={engId} onChange={e=>setEngId(e.target.value)} style={sel}>
+              <select value={engId} onChange={e=>setEngId(e.target.value)} style={sel} className="calls-control">
                 <option value="all">All engineers</option>
                 {engineers.map((e:any)=>(
                   <option key={e.id} value={e.id}>{e.name}</option>
@@ -836,11 +855,11 @@ const ExportModal = ({onClose, engineers}:any) => {
   );
 };
 
-export default function CallsModule({ atms, engineers, banks }: { atms: any[]; engineers: any[]; banks?: any[] }) {
+export default function CallsModule({ atms, engineers, banks, initialFilter = "all" }: { atms: any[]; engineers: any[]; banks?: any[]; initialFilter?: string }) {
   const [calls,setCalls]     = useState<Call[]>([]);
   const [showExport,setShowExport] = useState(false);
   const [loading,setLoading] = useState(true);
-  const [filter,setFilter]   = useState("all");
+  const [filter,setFilter]   = useState(initialFilter);
   const [priority,setPriority] = useState("all");
   const [modal,setModal]     = useState<null|"new"|"detail"|"edit">(null);
   const [selected,setSelected] = useState<Call|null>(null);
@@ -865,6 +884,7 @@ export default function CallsModule({ atms, engineers, banks }: { atms: any[]; e
   // Apply filter
   const filtered = calls.filter(c => {
     if (filter==="analytics") return true;
+    if (filter==="sla_breached") return c.sla_status==="breached"||Boolean(c.sla_breached);
     if (filter==="closed")    return c.status==="resolved"||c.status==="escalated";
     if (filter!=="all")       return c.status===filter;
     return true;
@@ -899,11 +919,9 @@ export default function CallsModule({ atms, engineers, banks }: { atms: any[]; e
     setLoading(true);
     setError(null);
     try {
-      // "closed" filter maps to both resolved and escalated on backend
       setPage(1);
-      const statusParam = filter==="analytics" ? "all" : filter==="closed" ? "closed" : filter;
       const res = await fetch(
-        `/calls?status=${statusParam}&priority=${priority}`,
+        `/calls?status=all&priority=${priority}`,
         { headers:{ Accept:"application/json","X-Requested-With":"XMLHttpRequest" }, credentials:"same-origin" }
       );
       if (!res.ok) {
@@ -944,6 +962,7 @@ export default function CallsModule({ atms, engineers, banks }: { atms: any[]; e
     assigned: calls.filter(c=>c.status==="assigned").length,
     on_hold:  calls.filter(c=>c.status==="on_hold").length,
     closed:   calls.filter(c=>c.status==="resolved"||c.status==="escalated").length,
+    sla_breached: calls.filter(c=>c.sla_status==="breached"||c.sla_breached).length,
   };
 
   const FILTER_TABS = [
@@ -952,24 +971,24 @@ export default function CallsModule({ atms, engineers, banks }: { atms: any[]; e
     {id:"assigned",  label:"Assigned"},
     {id:"on_hold",   label:"On Hold"},
     {id:"closed",    label:"Closed"},
+    {id:"sla_breached", label:"SLA breached"},
     {id:"analytics", label:"📊 Analytics"},
   ];
 
   return (
     <ErrorBoundary>
-    <div style={{padding:24,fontFamily:"inherit"}}>
+    <div className="calls-page">
       {/* Header */}
-      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",
-        flexWrap:"wrap",gap:12,marginBottom:20}}>
+      <div className="calls-page-header">
         <div>
-          <h2 style={{margin:0,fontSize:22,fontWeight:800,color:C.text}}>Calls</h2>
+          <h2>Calls</h2>
           <p style={{margin:"4px 0 0",fontSize:13,color:C.textMuted}}>
             Manage and assign emergency ATM calls to field engineers
           </p>
         </div>
-        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+        <div className="calls-page-actions">
           {/* Priority filter */}
-          <select value={priority} onChange={e=>setPriority(e.target.value)} style={{
+          <select className="calls-control calls-priority-filter" value={priority} onChange={e=>setPriority(e.target.value)} style={{
             padding:"8px 12px",borderRadius:10,border:`1px solid ${C.border}`,
             fontSize:13,fontFamily:"inherit",color:C.textMid,background:C.surface,
             outline:"none",cursor:"pointer"}}>
@@ -978,26 +997,26 @@ export default function CallsModule({ atms, engineers, banks }: { atms: any[]; e
             <option value="medium">Medium</option>
             <option value="low">Low</option>
           </select>
-          <button onClick={load} style={{background:C.surface,border:`1px solid ${C.border}`,
+          <button className="calls-action-button calls-action-button--secondary" onClick={load} style={{background:C.surface,border:`1px solid ${C.border}`,
             borderRadius:10,padding:"8px 14px",fontSize:13,fontWeight:600,color:C.textMid,
             cursor:"pointer",fontFamily:"inherit"}}>↻ Refresh</button>
-          <button onClick={()=>setShowExport(true)} style={{background:"#f8f9fb",
+          <button className="calls-action-button calls-action-button--secondary" onClick={()=>setShowExport(true)} style={{background:"#f8f9fb",
             border:`1px solid ${C.border}`,borderRadius:10,padding:"9px 16px",
             fontSize:13,fontWeight:600,color:C.textMid,cursor:"pointer",fontFamily:"inherit"}}>
             📊 Export Report
           </button>
-          <button onClick={()=>setModal("new")} style={{background:C.primary,color:"#fff",
+          <button className="calls-action-button calls-action-button--primary" onClick={()=>setModal("new")} style={{background:C.primary,color:"#fff",
             border:"none",borderRadius:10,padding:"9px 18px",fontSize:13,fontWeight:700,
             cursor:"pointer",fontFamily:"inherit"}}>+ Log Call</button>
         </div>
       </div>
 
       {/* Status filter tabs */}
-      <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
+      <div className="calls-status-tabs" role="tablist" aria-label="Filter calls">
         {FILTER_TABS.map(f=>{
           const active=filter===f.id;
           return (
-            <button key={f.id} onClick={()=>setFilter(f.id)} style={{
+            <button key={f.id} role="tab" aria-selected={active} className={`calls-status-tab${active?" is-active":""}`} onClick={()=>{setFilter(f.id);setPage(1);}} style={{
               padding:"6px 14px",borderRadius:20,border:active?"none":`1px solid ${C.border}`,
               cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:active?700:500,
               background:active?C.primary:C.surface,color:active?"#fff":C.textMid}}>

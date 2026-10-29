@@ -81,6 +81,7 @@ button:hover:not(:disabled) { filter: brightness(0.94); }
 }
 
 .nav-links        { display: flex; gap: 2px; flex: 1; }
+.admin-nav-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 
 .nav-link {
   display: flex;
@@ -223,23 +224,6 @@ button:hover:not(:disabled) { filter: brightness(0.94); }
   line-height: 1;
 }
 
-.drawer-stats {
-  padding: 14px 16px;
-  display: flex;
-  gap: 8px;
-  border-bottom: 1px solid #e8eaed;
-}
-
-.drawer-stat {
-  flex: 1;
-  border-radius: 10px;
-  padding: 10px 12px;
-  text-align: center;
-}
-
-.drawer-stat__value { font-size: 20px; font-weight: 800; }
-.drawer-stat__label { font-size: 11px; font-weight: 600; margin-top: 1px; }
-
 .drawer-nav        { padding: 10px 12px; flex: 1; }
 .drawer-nav__label { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px 8px 6px; }
 .drawer-divider    { height: 1px; background: #e8eaed; margin: 12px 8px; }
@@ -356,6 +340,23 @@ button:hover:not(:disabled) { filter: brightness(0.94); }
   cursor: default;
   position: relative;
   overflow: hidden;
+}
+
+.dashboard-stat-link {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 140px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dashboard-stat-link .stat-card {
+  width: 100%;
+  min-width: 0;
 }
 
 .stat-card:hover {
@@ -993,6 +994,17 @@ button:hover:not(:disabled) { filter: brightness(0.94); }
   .card-hover:hover     { transform: none; }
   .bank-card:hover,
   .eng-card:hover       { transform: none; }
+}
+
+@media (min-width: 769px) and (max-width: 1050px) {
+  .desktop-nav__inner   { gap: 10px; padding: 0 12px; }
+  .nav-logo             { margin-right: 0; }
+  .nav-logo__sub        { display: none; }
+  .nav-links            { gap: 0; }
+  .nav-link             { gap: 4px; padding: 9px 7px; font-size: 12px; }
+  .nav-link__icon       { display: none; }
+  .admin-nav-actions    { gap: 5px; }
+  .admin-nav-actions > button { gap: 4px !important; padding-right: 7px !important; padding-left: 7px !important; }
 }
 
 @media (min-width: 769px) {

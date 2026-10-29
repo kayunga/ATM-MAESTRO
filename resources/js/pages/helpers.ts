@@ -36,6 +36,7 @@ export const normAtm = (a: Atm): Atm => ({
   ...a,
   terminalId:   a.terminal_id   ?? a.terminalId,
   serialNumber: a.serial_number ?? a.serialNumber,
+  hasGbna: a.has_gbna ?? a.hasGbna ?? false,
   bankId:       a.bank_id       ?? a.bankId,
   engineerId:   a.engineer_id   ?? a.engineerId,
   installDate:  toDateStr(a.install_date ?? a.installDate),
@@ -65,3 +66,47 @@ export const normMaint = (m: MaintenanceRecord): MaintenanceRecord => ({
 });
 
 export const normEng = <T>(e: T): T => ({ ...e });
+
+let companyLogoData: Promise<string> | null = null;
+
+export const getCompanyLogoData = (): Promise<string> => {
+  if (!companyLogoData) {
+    companyLogoData = fetch("/logo.png", { credentials: "same-origin" })
+      .then(response => {
+        if (!response.ok) throw new Error(`Failed to load company logo (${response.status})`);
+        return response.blob();
+      })
+      .then(blob => new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result === "string") resolve(reader.result);
+          else reject(new Error("Company logo could not be read"));
+        };
+        reader.onerror = () => reject(reader.error ?? new Error("Company logo could not be read"));
+        reader.readAsDataURL(blob);
+      }))
+      .catch(error => {
+        companyLogoData = null;
+        throw error;
+      });
+  }
+  return companyLogoData;
+};
+
+export const addCompanyLogo = async (
+  doc: {
+    getImageProperties: (imageData: string) => { width: number; height: number };
+    addImage: (imageData: string, format: string, x: number, y: number, width: number, height: number) => void;
+  },
+  x = 14,
+  y = 4,
+  maxWidth = 80,
+  maxHeight = 12,
+): Promise<void> => {
+  const imageData = await getCompanyLogoData();
+  const { width, height } = doc.getImageProperties(imageData);
+  const scale = Math.min(maxWidth / width, maxHeight / height);
+  const imageWidth = width * scale;
+  const imageHeight = height * scale;
+  doc.addImage(imageData, "PNG", x, y + (maxHeight - imageHeight) / 2, imageWidth, imageHeight);
+};

@@ -10,6 +10,24 @@ use ZipArchive;
 class JobCardDownloadController extends Controller
 {
     /**
+     * Open a print-ready copy of the saved job card.
+     * GET /job-cards/{jobCard}/print
+     */
+    public function printCard(Request $request, JobCard $jobCard)
+    {
+        $user = $request->user();
+        $isAssignedEngineer = $jobCard->engineer()
+            ->where('user_id', $user->id)
+            ->exists();
+
+        abort_unless($user->is_admin || $isAssignedEngineer, 403);
+
+        $jobCard->load(['atm.bank', 'engineer', 'reviewer']);
+
+        return view('job-cards.print', compact('jobCard'));
+    }
+
+    /**
      * Download a single attachment in its original format.
      * GET /job-cards/{jobCard}/files/{index}
      *

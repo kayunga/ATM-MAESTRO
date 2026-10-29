@@ -5,7 +5,7 @@ import { router, usePage } from "@inertiajs/react";
 
 // ── Modules ──────────────────────────────────────────────────────────────────
 import { C, NCR_MODELS, STATUSES, MAINT_TYPES, MAINT_STATUS, ZAMBIA_BANKS, bankColor, PAGE_SIZE } from "./constants";
-import { fmt, fmtISO, today, qtr, statusColor, statusBg, mColor, mBg, normAtm, normBank, normMaint } from "./helpers";
+import { fmt, fmtISO, today, qtr, statusColor, statusBg, mColor, mBg, normAtm, normBank, normMaint, addCompanyLogo, getCompanyLogoData } from "./helpers";
 import { useToast, usePagination } from "./hooks";
 import { Badge, Btn, Input, Modal, Card, StatCard, EmptyState, Confirm, Checkbox, Paginator, BulkBar } from "./components/ui";
 import type { PageProps } from "./types";
@@ -43,18 +43,18 @@ async function exportMaintenancePDF(
   if (records.length === 0) { toast("No records to export", "warning"); return; }
   try {
     const JsPDF = await loadJsPDF();
-    const doc = new JsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-    const cQ = qtr(today), cY = today.getFullYear();
+    const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
     const now = new Date().toLocaleString("en-GB");
-
-    // ── Header band ──────────────────────────────────────────────────────────
-    doc.setFillColor(29, 110, 245);
-    doc.rect(0, 0, 297, 22, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(14); doc.setFont("helvetica", "bold");
-    doc.text("NCR Fleet ATM Manager — Maintenance Report", 14, 9);
-    doc.setFontSize(8); doc.setFont("helvetica", "normal");
-    doc.text(`Generated: ${now}   ·   Records: ${records.length}`, 14, 16);
+    const logoData = await getCompanyLogoData();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const marginX = 8;
+    const logoWidth = 52;
+    const logoProps = doc.getImageProperties(logoData);
+    const logoHeight = logoWidth * logoProps.height / logoProps.width;
+    const headerTextX = marginX + logoWidth + 5;
+    const headerTextWidth = pageWidth - marginX - headerTextX;
+    const headerText = `Maintenance Report · Generated: ${now} · Records: ${records.length}`;
 
     // ── Active filters summary ────────────────────────────────────────────────
     const filters: string[] = [];
@@ -65,12 +65,6 @@ async function exportMaintenancePDF(
     if (meta.fQ)       filters.push(`Quarter: Q${meta.fQ}`);
     const filterLine = filters.length ? filters.join("   ·   ") : "All records (no filters applied)";
 
-    doc.setFillColor(238, 243, 254);
-    doc.rect(0, 22, 297, 10, "F");
-    doc.setTextColor(29, 110, 245);
-    doc.setFontSize(8); doc.setFont("helvetica", "italic");
-    doc.text(`Filters: ${filterLine}`, 14, 28.5);
-
     // ── Summary chips ─────────────────────────────────────────────────────────
     const statusCounts: Record<string,number> = {};
     records.forEach(r => { statusCounts[r.status] = (statusCounts[r.status] || 0) + 1; });
@@ -80,35 +74,40 @@ async function exportMaintenancePDF(
       ["In Progress", statusCounts["In Progress"] || 0, [29,110,245]],
       ["Cancelled",   statusCounts["Cancelled"]   || 0, [139,144,154]],
     ] as const;
-    let cx = 14;
+    const chipGap = 4;
+    const chipWidth = (pageWidth - marginX * 2 - chipGap * (chips.length - 1)) / chips.length;
+    let cx = marginX;
     chips.forEach(([label, count, [r,g,b]]) => {
       doc.setFillColor(r,g,b);
-      doc.roundedRect(cx, 34, 52, 10, 2, 2, "F");
+      doc.roundedRect(cx, 27, chipWidth, 9, 2, 2, "F");
       doc.setTextColor(255,255,255);
       doc.setFontSize(9); doc.setFont("helvetica", "bold");
-      doc.text(`${count}`, cx + 4, 40.5);
-      doc.setFontSize(8); doc.setFont("helvetica", "normal");
-      doc.text(label, cx + 16, 40.5);
-      cx += 56;
+      doc.text(`${count}`, cx + 4, 33);
+      doc.setFontSize(6.5); doc.setFont("helvetica", "normal");
+      doc.text(label, cx + 13, 33);
+      cx += chipWidth + chipGap;
     });
 
+    doc.setFillColor(238, 243, 254);
+    doc.rect(0, 16, pageWidth, 8, "F");
+    doc.setTextColor(29, 110, 245);
+    doc.setFontSize(7.5); doc.setFont("helvetica", "italic");
+    doc.text(`Filters: ${filterLine}`, marginX, 21.5);
+
     // ── Table ─────────────────────────────────────────────────────────────────
-    const rows = records.map((m, idx) => {
+    const rows = records.map(m => {
       const atm  = atms.find(a => a.id == m.atmId);
       const eng  = engineers.find(e => e.id == m.engineerId);
       const bank = banks.find(b => b.id == atm?.bankId);
       return [
-        idx + 1,
         atm?.terminalId ?? "—",
         bank?.shortCode ?? "—",
         atm?.location   ?? "—",
-        m.type,
         `Q${m.quarter} ${m.year}`,
         eng?.name       ?? "—",
         fmt(m.scheduledDate),
         m.completedDate ? fmt(m.completedDate) : "—",
         m.status,
-        m.notes || "—",
       ];
     });
 
@@ -119,28 +118,40 @@ async function exportMaintenancePDF(
       return [139,144,154];
     };
 
+    const drawFirstPageHeader = () => {
+      doc.addImage(logoData, "PNG", marginX, 5, logoWidth, logoHeight);
+      doc.setTextColor(26, 29, 35);
+      doc.setFont("helvetica", "bold");
+      let fontSize = 8;
+      doc.setFontSize(fontSize);
+      while (doc.getTextWidth(headerText) > headerTextWidth && fontSize > 5.5) {
+        fontSize -= 0.25;
+        doc.setFontSize(fontSize);
+      }
+      doc.text(headerText, headerTextX, 5 + logoHeight / 2 + fontSize / 3);
+    };
+
     (doc as any).autoTable({
-      startY: 47,
-      head: [["#","Terminal ID","Bank","Location","Type","Quarter","Engineer","Scheduled","Completed","Status","Notes"]],
+      startY: 41,
+      head: [["Terminal ID","Bank","Location","Quarter","Engineer","Scheduled","Date","Status"]],
       body: rows,
-      styles: { fontSize: 7.5, cellPadding: 2.5, font: "helvetica", textColor: [26,29,35] },
-      headStyles: { fillColor: [26,29,35], textColor: 255, fontStyle: "bold", fontSize: 8 },
+      styles: { fontSize: 7.5, cellPadding: 2, font: "helvetica", textColor: [26,29,35], overflow: "linebreak", valign: "middle" },
+      headStyles: { fillColor: [26,29,35], textColor: 255, fontStyle: "bold", fontSize: 7.5, cellPadding: 2 },
       alternateRowStyles: { fillColor: [248,249,251] },
+      rowPageBreak: "avoid",
+      showHead: "everyPage",
       columnStyles: {
-        0:  { cellWidth: 8,  halign: "center" },
-        1:  { cellWidth: 26, fontStyle: "bold", textColor: [29,110,245] },
-        2:  { cellWidth: 18 },
-        3:  { cellWidth: 32 },
-        4:  { cellWidth: 28 },
-        5:  { cellWidth: 18 },
-        6:  { cellWidth: 28 },
-        7:  { cellWidth: 20 },
-        8:  { cellWidth: 20 },
-        9:  { cellWidth: 22 },
-        10: { cellWidth: "auto" },
+        0: { cellWidth: 26, fontStyle: "bold", textColor: [29,110,245] },
+        1: { cellWidth: 16 },
+        2: { cellWidth: 36 },
+        3: { cellWidth: 18 },
+        4: { cellWidth: 28 },
+        5: { cellWidth: 22 },
+        6: { cellWidth: 22 },
+        7: { cellWidth: 24 },
       },
       didParseCell: (data: any) => {
-        if (data.section === "body" && data.column.index === 9) {
+        if (data.section === "body" && data.column.index === 7) {
           const s = data.cell.raw as string;
           const [r,g,b] = statusColor(s);
           data.cell.styles.textColor = [r,g,b];
@@ -148,14 +159,18 @@ async function exportMaintenancePDF(
         }
       },
       didDrawPage: (data: any) => {
-        // Footer on every page
-        const pCount = (doc as any).internal.getNumberOfPages();
-        doc.setFontSize(7.5); doc.setTextColor(139,144,154); doc.setFont("helvetica","normal");
-        doc.text(`NCR Fleet ATM Manager · Confidential`, 14, 205);
-        doc.text(`Page ${data.pageNumber} of ${pCount}`, 270, 205, { align: "right" });
+        if (data.pageNumber === 1) drawFirstPageHeader();
       },
-      margin: { top: 47, left: 14, right: 14, bottom: 12 },
+      margin: { top: 10, left: marginX, right: marginX, bottom: 10 },
     });
+
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+      doc.setPage(pageNumber);
+      doc.setFontSize(7.5); doc.setTextColor(139,144,154); doc.setFont("helvetica","normal");
+      doc.text(`Techmasters Zambia · Confidential`, marginX, pageHeight - 4);
+      doc.text(`Page ${pageNumber} of ${pageCount}`, pageWidth - marginX, pageHeight - 4, { align: "right" });
+    }
 
     const bankLabel  = meta.fBank   ? `_${banks.find(b=>String(b.id)===meta.fBank)?.shortCode??meta.fBank}` : "";
     const statusLabel= meta.fStatus ? `_${meta.fStatus.replace(/ /g,"_")}` : "";
@@ -167,6 +182,118 @@ async function exportMaintenancePDF(
   } catch (e) {
     console.error(e);
     toast("Export failed. Check your internet connection.", "error");
+  }
+}
+
+async function exportEngineerPmProgressPDF(
+  progress: { engineer: any; completed: number; total: number; remaining: number; percentage: number }[],
+  quarter: number,
+  year: number,
+  toast: (msg: string, type: any) => void,
+) {
+  if (progress.length === 0) {
+    toast(`No engineer PM progress to export for Q${quarter} ${year}`, "warning");
+    return;
+  }
+
+  try {
+    const JsPDF = await loadJsPDF();
+    const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const logoData = await getCompanyLogoData();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const marginX = 12;
+    const logoProps = doc.getImageProperties(logoData);
+    const logoWidth = pageWidth - marginX * 2;
+    const logoHeight = logoWidth * logoProps.height / logoProps.width;
+    const total = progress.reduce((sum, item) => sum + item.total, 0);
+    const completed = progress.reduce((sum, item) => sum + item.completed, 0);
+    const remaining = total - completed;
+    const percentage = total ? Math.round(completed / total * 100) : 0;
+    const reportDate = new Date().toLocaleString("en-GB");
+
+    doc.addImage(logoData, "PNG", marginX, 5, logoWidth, logoHeight);
+    const titleY = logoHeight + 12;
+    doc.setTextColor(26, 29, 35);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.text(`Engineer PM Progress — Q${quarter} ${year}`, marginX, titleY);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text(`Generated: ${reportDate}`, marginX, titleY + 6);
+
+    const summaryY = titleY + 12;
+    const summaryGap = 4;
+    const summaryWidth = (pageWidth - marginX * 2 - summaryGap * 3) / 4;
+    const summaryItems = [
+      { label: "Scheduled", value: total, color: [29, 110, 245] },
+      { label: "Completed", value: completed, color: [16, 179, 102] },
+      { label: "Remaining", value: remaining, color: [245, 158, 11] },
+      { label: "Overall", value: `${percentage}%`, color: [8, 145, 178] },
+    ];
+    summaryItems.forEach((item, index) => {
+      const x = marginX + index * (summaryWidth + summaryGap);
+      doc.setFillColor(item.color[0], item.color[1], item.color[2]);
+      doc.roundedRect(x, summaryY, summaryWidth, 17, 2, 2, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text(String(item.value), x + summaryWidth / 2, summaryY + 7, { align: "center" });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.text(item.label, x + summaryWidth / 2, summaryY + 13, { align: "center" });
+    });
+
+    (doc as any).autoTable({
+      startY: summaryY + 23,
+      margin: { left: marginX, right: marginX, top: 14, bottom: 12 },
+      head: [["Engineer", "Assigned", "Completed", "Remaining", "Progress"]],
+      body: progress.map(item => [item.engineer.name, item.total, item.completed, item.remaining, ""]),
+      styles: { font: "helvetica", fontSize: 9, cellPadding: 3, textColor: [26, 29, 35], valign: "middle" },
+      headStyles: { fillColor: [26, 29, 35], textColor: [255, 255, 255], fontStyle: "bold" },
+      alternateRowStyles: { fillColor: [248, 249, 251] },
+      rowPageBreak: "avoid",
+      showHead: "everyPage",
+      columnStyles: {
+        0: { cellWidth: 62, fontStyle: "bold" },
+        1: { cellWidth: 24, halign: "center" },
+        2: { cellWidth: 27, halign: "center" },
+        3: { cellWidth: 27, halign: "center" },
+        4: { cellWidth: "auto" },
+      },
+      didDrawCell: (data: any) => {
+        if (data.section !== "body" || data.column.index !== 4) return;
+        const item = progress[data.row.index];
+        const barX = data.cell.x + 3;
+        const barY = data.cell.y + data.cell.height / 2 - 1.5;
+        const barWidth = data.cell.width - 18;
+        doc.setFillColor(232, 234, 237);
+        doc.roundedRect(barX, barY, barWidth, 3, 1.5, 1.5, "F");
+        if (item.percentage > 0) {
+          doc.setFillColor(item.percentage === 100 ? 16 : 8, item.percentage === 100 ? 179 : 145, item.percentage === 100 ? 102 : 178);
+          doc.roundedRect(barX, barY, barWidth * item.percentage / 100, 3, 1.5, 1.5, "F");
+        }
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7);
+        doc.setTextColor(26, 29, 35);
+        doc.text(`${item.percentage}%`, data.cell.x + data.cell.width - 3, data.cell.y + data.cell.height / 2 + 1, { align: "right" });
+      },
+    });
+
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+      doc.setPage(pageNumber);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(139, 144, 154);
+      doc.text(`Techmasters Zambia · Page ${pageNumber} of ${pageCount}`, pageWidth / 2, pageHeight - 5, { align: "center" });
+    }
+
+    doc.save(`engineer-pm-progress-Q${quarter}-${year}.pdf`);
+    toast(`Engineer PM progress exported for Q${quarter} ${year}`, "success");
+  } catch (error) {
+    console.error(error);
+    toast("Could not export engineer PM progress PDF.", "error");
   }
 }
 
@@ -232,8 +359,10 @@ const BulkPMWizard = ({atms,engineers,banks,onSave,onClose}) => {
   const selList = candidates.filter(a=>resolved.has(a.id));
 
   const doSave = () => {
-    onSave(selList.map(atm=>({atmId:atm.id,engineerId:getEng(atm),type:cfg.type,status:cfg.status,scheduledDate:cfg.scheduledDate,completedDate:cfg.status==="Completed"?cfg.completedDate:null,quarter:Number(cfg.quarter),year:Number(cfg.year),notes:cfg.notes})));
-    setStep(3);
+    onSave(
+      selList.map(atm=>({atmId:atm.id,engineerId:getEng(atm),type:cfg.type,status:cfg.status,scheduledDate:cfg.scheduledDate,completedDate:cfg.status==="Completed"?cfg.completedDate:null,quarter:Number(cfg.quarter),year:Number(cfg.year),notes:cfg.notes})),
+      ()=>setStep(3),
+    );
   };
 
   const steps=["Configure","Review & Select","Done"];
@@ -354,7 +483,7 @@ const BulkPMWizard = ({atms,engineers,banks,onSave,onClose}) => {
           <div style={{fontSize:56,marginBottom:16}}>✅</div>
           <h3 style={{margin:"0 0 8px",fontSize:20,fontWeight:800,color:C.text}}>Bulk PM Logged!</h3>
           <p style={{color:C.textMid,fontSize:14,margin:"0 0 24px"}}>
-            Successfully created <b style={{color:C.green}}>{selList.length}</b> maintenance records for {cfg.type} · Q{cfg.quarter} {cfg.year}.
+            Successfully saved <b style={{color:C.green}}>{selList.length}</b> maintenance records as {cfg.status.toLowerCase()} for {cfg.type} · Q{cfg.quarter} {cfg.year}.
           </p>
           <Btn onClick={onClose}>Close</Btn>
         </div>
@@ -443,11 +572,11 @@ const BankForm = ({initial,onSave,onClose}) => {
   );
 };
 
-const defaultAtm={terminalId:"",model:"",location:"",address:"",bankId:"",engineerId:"",status:"Active",installDate:"",serialNumber:"",notes:""};
+const defaultAtm={terminalId:"",model:"",location:"",address:"",bankId:"",engineerId:"",status:"Active",installDate:"",serialNumber:"",hasGbna:false,notes:""};
 const AtmForm = ({initial,engineers,banks,onSave,onClose}) => {
-  const [form,setForm]=useState(initial||defaultAtm);
+  const [form,setForm]=useState(initial?{...initial,hasGbna:initial.has_gbna??initial.hasGbna??false}:defaultAtm);
   const set=k=>v=>setForm(f=>({...f,[k]:v}));
-  const valid=form.terminalId&&form.model&&form.location&&form.engineerId&&form.bankId;
+  const valid=form.terminalId&&form.model&&form.location&&form.bankId;
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
@@ -456,10 +585,14 @@ const AtmForm = ({initial,engineers,banks,onSave,onClose}) => {
         <Input label="NCR Model" value={form.model} onChange={set("model")} required options={NCR_MODELS}/>
         <Input label="Status" value={form.status} onChange={set("status")} options={STATUSES}/>
         <Input label="Bank / Client" value={form.bankId} onChange={set("bankId")} required options={banks.map(b=>({value:b.id,label:`${b.name} (${b.shortCode})`}))}/>
-        <Input label="Assigned Engineer" value={form.engineerId} onChange={set("engineerId")} required options={engineers.map(e=>({value:e.id,label:`${e.name} (${e.region})`}))}/>
+        <Input label="Assigned Engineer (optional)" value={form.engineerId} onChange={set("engineerId")} options={[{value:"",label:"Unassigned"},...engineers.map(e=>({value:e.id,label:`${e.name} (${e.region})`}))]}/>
         <Input label="Location Name" value={form.location} onChange={set("location")} placeholder="Cairo Road Branch" required/>
         <Input label="Install Date" value={form.installDate} onChange={set("installDate")} type="date"/>
       </div>
+      <label style={{display:"flex",alignItems:"center",gap:9,fontSize:13,fontWeight:600,color:C.text}}>
+        <input type="checkbox" checked={!!form.hasGbna} onChange={event=>set("hasGbna")(event.target.checked)}/>
+        GBNA deposit module fitted (adds GBNA checks to PM job cards)
+      </label>
       <Input label="Full Address" value={form.address} onChange={set("address")} placeholder="Street, City"/>
       <Input label="Notes" value={form.notes} onChange={set("notes")} placeholder="Any remarks…" rows={2}/>
       <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn onClick={()=>valid&&onSave(form)} disabled={!valid}>Save ATM</Btn></div>
@@ -490,12 +623,72 @@ const MaintForm = ({initial,atms,engineers,banks,onSave,onClose}) => {
   );
 };
 
-const defaultEng={name:"",phone:"",email:"",region:"",create_login:false,password:"",password_confirmation:""};
+const EngineerSignaturePad = ({value,onChange,label}:any) => {
+  const canvasRef=useRef<HTMLCanvasElement|null>(null);
+  const drawing=useRef(false);
+  useEffect(()=>{
+    const canvas=canvasRef.current;
+    const context=canvas?.getContext("2d");
+    if(!canvas||!context)return;
+    context.clearRect(0,0,600,150);
+    if(value){
+      const image=new Image();
+      image.onload=()=>context.drawImage(image,0,0,600,150);
+      image.src=value;
+    }
+  },[value]);
+  const point=(event:any)=>{
+    const rect=event.currentTarget.getBoundingClientRect();
+    return {x:(event.clientX-rect.left)*600/rect.width,y:(event.clientY-rect.top)*150/rect.height};
+  };
+  const start=(event:any)=>{
+    event.preventDefault();
+    const context=event.currentTarget.getContext("2d");
+    if(!context)return;
+    const p=point(event);
+    drawing.current=true;
+    context.beginPath();
+    context.moveTo(p.x,p.y);
+    context.lineWidth=2.4;
+    context.lineCap="round";
+    context.strokeStyle="#132433";
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const move=(event:any)=>{
+    if(!drawing.current)return;
+    const context=event.currentTarget.getContext("2d");
+    if(!context)return;
+    const p=point(event);
+    context.lineTo(p.x,p.y);
+    context.stroke();
+  };
+  const end=(event:any)=>{
+    if(!drawing.current)return;
+    drawing.current=false;
+    onChange(event.currentTarget.toDataURL("image/png"));
+  };
+  const clear=()=>{
+    const canvas=canvasRef.current;
+    const context=canvas?.getContext("2d");
+    if(!canvas||!context)return;
+    context.clearRect(0,0,600,150);
+    onChange("");
+  };
+  return <div>
+    <label className="field-label">{label}</label>
+    <canvas ref={canvasRef} width={600} height={150} onPointerDown={start} onPointerMove={move}
+      onPointerUp={end} onPointerCancel={end}
+      style={{width:"100%",height:90,display:"block",touchAction:"none",background:"#fff",border:`1px solid ${C.border}`,borderRadius:8}}/>
+    <button type="button" onClick={clear} style={{marginTop:6,padding:0,border:0,background:"none",color:C.accent,fontWeight:700,cursor:"pointer"}}>Clear signature</button>
+  </div>;
+};
+
+const defaultEng={name:"",phone:"",email:"",region:"",signature:"",create_login:false,password:"",password_confirmation:""};
 const EngForm = ({initial,onSave,onClose}) => {
   const isEdit = !!initial?.id;
   const hasLogin = !!initial?.user_id;
   const [form,setForm] = useState(isEdit
-    ? {...initial, create_login:false, password:"", password_confirmation:"", revoke_login:false}
+    ? {...initial, signature:initial.signature||"", create_login:false, password:"", password_confirmation:"", revoke_login:false}
     : defaultEng);
   const set = k=>v=>setForm(f=>({...f,[k]:v}));
 
@@ -516,6 +709,7 @@ const EngForm = ({initial,onSave,onClose}) => {
         <Input label="Phone"     value={form.phone}  onChange={set("phone")}  placeholder="+260 97 000 0000"/>
         <Input label="Email"     value={form.email}  onChange={set("email")}  type="email" placeholder="j.doe@techmasters.zm"/>
       </div>
+      <EngineerSignaturePad label="Saved Engineer Signature" value={form.signature} onChange={set("signature")}/>
 
       {/* ── Portal login section ── */}
       <div style={{borderTop:`1px solid ${C.border}`,paddingTop:16}}>
@@ -637,73 +831,101 @@ const EngForm = ({initial,onSave,onClose}) => {
 };
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
-const PM_DUE_PAGE = 8;
-const Dashboard = ({atms,maintenance,engineers,banks,onBulkPM,pmBannerDismissed,onDismissPMBanner}) => {
+const Dashboard = ({atms,maintenance,approvedPmCards,engineers,banks,pendingCalls,slaBreachedCalls,onNavigate,onBulkPM,toast}) => {
+  const currentQuarter=qtr(today),currentYear=today.getFullYear();
+  const [selectedQuarter,setSelectedQuarter]=useState(currentQuarter);
+  const [selectedYear,setSelectedYear]=useState(currentYear);
   const active=atms.filter(a=>a.status==="Active").length;
   const offline=atms.filter(a=>a.status==="Offline").length;
-  const um=atms.filter(a=>a.status==="Under Maintenance").length;
-  const cQ=qtr(today),cY=today.getFullYear();
-  const pmDue=atms.filter(a=>!maintenance.some(m=>m.atmId==a.id&&m.type==="Quarterly PM"&&m.quarter==cQ&&m.year==cY&&m.status==="Completed"));
-  const {page:pmPg,setPage:setPmPg,totalPages:pmTP,slice:pmSlice,total:pmTotal}=usePagination(pmDue,PM_DUE_PAGE);
+  const quarterPm=maintenance.filter(m=>m.type==="Quarterly PM"&&Number(m.quarter)===selectedQuarter&&Number(m.year)===selectedYear&&m.status!=="Cancelled"&&m.engineerId);
+  const quarterApprovedPmCards=approvedPmCards.filter(card=>(card.job_type==="maintenance"||card.type==="Quarterly PM")
+    &&Number(card.quarter)===selectedQuarter&&Number(card.year)===selectedYear&&card.engineer_id);
+  const engineerProgress=engineers.map(engineer=>{
+    const assignedAtms=new Set(quarterPm.filter(m=>String(m.engineerId)===String(engineer.id)).map(m=>String(m.atmId)));
+    const completedAtms=new Set(quarterPm.filter(m=>String(m.engineerId)===String(engineer.id)&&m.status==="Completed").map(m=>String(m.atmId)));
+    quarterApprovedPmCards.filter(card=>String(card.engineer_id)===String(engineer.id)).forEach(card=>{
+      assignedAtms.add(String(card.atm_id));
+      completedAtms.add(String(card.atm_id));
+    });
+    const total=assignedAtms.size;
+    const completed=completedAtms.size;
+    return {engineer,completed,total,remaining:total-completed,percentage:total?Math.round(completed/total*100):0};
+  }).filter(progress=>progress.total>0).sort((a,b)=>b.percentage-a.percentage||b.completed-a.completed||a.engineer.name.localeCompare(b.engineer.name));
+  const pmTotal=engineerProgress.reduce((total,progress)=>total+progress.total,0);
+  const pmCompleted=engineerProgress.reduce((total,progress)=>total+progress.completed,0);
+  const pmPercentage=pmTotal?Math.round(pmCompleted/pmTotal*100):0;
+  const atmsByBank=atms.reduce((counts,atm)=>{
+    const bankId=String(atm.bankId);
+    counts.set(bankId,(counts.get(bankId)??0)+1);
+    return counts;
+  },new Map());
+  const years=Array.from(new Set([currentYear,...maintenance.map(m=>Number(m.year)).filter(Number.isFinite)])).sort((a,b)=>b-a);
+  const handleExportProgress=()=>exportEngineerPmProgressPDF(engineerProgress,selectedQuarter,selectedYear,(message,type)=>toast(message,type));
   const recent=[...maintenance].sort((a,b)=>new Date(b.scheduledDate)-new Date(a.scheduledDate)).slice(0,6);
   return (
     <div style={{display:"flex",flexDirection:"column",gap:24}}>
       <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
-        <StatCard label="Total ATMs"     value={atms.length}  sub="in fleet"              color={C.accent}  icon="🏧"/>
-        <StatCard label="Banks Served"   value={banks.length} sub="client banks"          color={C.purple}  icon="🏦"/>
+        <button type="button" className="dashboard-stat-link" onClick={()=>onNavigate("calls","pending")} aria-label="View pending calls">
+          <StatCard label="Pending Calls" value={pendingCalls} sub="awaiting assignment" color={C.amber} icon="📞"/>
+        </button>
+        <button type="button" className="dashboard-stat-link" onClick={()=>onNavigate("calls","sla_breached")} aria-label="View SLA-breached calls">
+          <StatCard label="SLA Breached" value={slaBreachedCalls} sub="missed response target" color={slaBreachedCalls?C.red:C.green} icon="⏱️"/>
+        </button>
         <StatCard label="Active"         value={active}       sub="online & operational"  color={C.green}   icon="✅"/>
         <StatCard label="Offline"        value={offline}      sub="need attention"        color={C.red}     icon="🔴"/>
-        <StatCard label="In Maintenance" value={um}           sub="being serviced"        color={C.amber}   icon="🔧"/>
-        <StatCard label={`Q${cQ} PM Due`} value={pmDue.length} sub="need quarterly PM"   color={pmDue.length>0?C.amber:C.green} icon="📋"/>
+        <StatCard label="PM Progress" value={`${pmPercentage}%`} sub={`${pmCompleted}/${pmTotal} completed`} color={pmPercentage===100?C.green:C.teal} icon="📊"/>
       </div>
-
-      {pmDue.length>0&&!pmBannerDismissed&&(
-        <div style={{background:`linear-gradient(135deg,${C.tealLight},#e0f2fe)`,border:`1.5px solid ${C.teal}44`,borderRadius:12,padding:"16px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12,position:"relative"}}>
-          <div>
-            <div style={{fontSize:15,fontWeight:700,color:C.teal}}>⚡ {pmDue.length} ATM{pmDue.length!==1?"s":""} need Q{cQ} {cY} Preventive Maintenance</div>
-            <div style={{fontSize:13,color:C.teal+"bb",marginTop:2}}>Use Bulk PM Log to log all of them at once in seconds</div>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <Btn variant="teal" onClick={onBulkPM}>⚡ Bulk PM Log Now</Btn>
-            <button onClick={onDismissPMBanner} title="Dismiss" style={{background:"rgba(8,145,178,.12)",border:"none",borderRadius:7,cursor:"pointer",fontSize:16,color:C.teal,padding:"6px 8px",lineHeight:1,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}} aria-label="Dismiss banner">×</button>
-          </div>
-        </div>
-      )}
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
         <Card>
-          <div style={{padding:"18px 20px 12px",borderBottom:`1px solid ${C.border}`}}><h3 style={{margin:0,fontSize:15,fontWeight:700,color:C.text}}>ATMs by Bank</h3></div>
+          <div style={{padding:"18px 20px 12px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+            <h3 style={{margin:0,fontSize:15,fontWeight:700,color:C.text}}>ATMs by Bank</h3>
+            <span style={{fontSize:12,color:C.textMuted}}><strong style={{color:C.text}}>{atms.length}</strong> ATMs · <strong style={{color:C.text}}>{banks.length}</strong> banks</span>
+          </div>
           <div style={{padding:"8px 0"}}>
-            {banks.map((bank,i)=>{const count=atms.filter(a=>a.bankId==bank.id).length;const pct=atms.length?Math.round((count/atms.length)*100):0;const col=bankColor(i);return(
+            {banks.map((bank,i)=>{const count=atmsByBank.get(String(bank.id))??0;const pct=atms.length?Math.round((count/atms.length)*100):0;const col=bankColor(i);return(
               <div key={bank.id} className="pm-due-row" style={{padding:"10px 20px",borderBottom:`1px solid ${C.surface}`}}>
                 <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><div style={{display:"flex",alignItems:"center",gap:8}}><div style={{width:8,height:8,borderRadius:2,background:col}}/><span style={{fontSize:13,fontWeight:600,color:C.text}}>{bank.name}</span></div><span style={{fontSize:13,fontWeight:700,color:col}}>{count}</span></div>
                 <div style={{height:5,borderRadius:4,background:C.surface}}><div style={{height:"100%",width:`${pct}%`,background:col,borderRadius:4,transition:"width .5s"}}/></div>
               </div>
             );})}
+            {atms.filter(atm=>!banks.some(bank=>String(bank.id)===String(atm.bankId))).length>0&&<div style={{padding:"10px 20px",color:C.textMuted,fontSize:12}}>Unassigned bank: <strong style={{color:C.text}}>{atms.filter(atm=>!banks.some(bank=>String(bank.id)===String(atm.bankId))).length} ATMs</strong></div>}
             {banks.length===0&&<EmptyState message="No banks added yet"/>}
           </div>
         </Card>
         <Card>
           <div style={{padding:"18px 20px 12px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
-            <h3 style={{margin:0,fontSize:15,fontWeight:700,color:C.text}}>Q{cQ} {cY} — PM Due</h3>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              {pmDue.length>0&&<span style={{fontSize:12,color:C.textMuted}}>{pmTotal} ATMs</span>}
-              {pmDue.length>0&&<Btn small variant="teal" onClick={onBulkPM}>⚡ Bulk Log</Btn>}
+            <div>
+              <h3 style={{margin:0,fontSize:15,fontWeight:700,color:C.text}}>Q{selectedQuarter} {selectedYear} — PM Progress by Engineer</h3>
+              <div style={{fontSize:12,color:C.textMuted,marginTop:3}}>{pmCompleted} of {pmTotal} scheduled PMs completed · {pmPercentage}% overall</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              <select aria-label="PM progress quarter" value={selectedQuarter} onChange={event=>setSelectedQuarter(Number(event.target.value))} style={{padding:"7px 9px",borderRadius:7,border:`1px solid ${C.border}`,background:"#fff",color:C.text,fontFamily:"inherit",fontSize:12}}>
+                {[1,2,3,4].map(quarter=><option key={quarter} value={quarter}>Q{quarter}</option>)}
+              </select>
+              <select aria-label="PM progress year" value={selectedYear} onChange={event=>setSelectedYear(Number(event.target.value))} style={{padding:"7px 9px",borderRadius:7,border:`1px solid ${C.border}`,background:"#fff",color:C.text,fontFamily:"inherit",fontSize:12}}>
+                {years.map(year=><option key={year} value={year}>{year}</option>)}
+              </select>
+              <Btn small variant="secondary" onClick={handleExportProgress}>📄 Export Progress PDF</Btn>
+              <Btn small variant="teal" onClick={onBulkPM}>⚡ Bulk PM Log</Btn>
             </div>
           </div>
-          {pmDue.length===0?(<div style={{padding:"24px 20px",textAlign:"center",color:C.green,fontSize:14,fontWeight:600}}>✓ All ATMs have Q{cQ} PM completed</div>):(
-            <>
-            <div style={{padding:"8px 0"}}>
-              {pmSlice.map(a=>{const eng=engineers.find(e=>e.id==a.engineerId);const bank=banks.find(b=>b.id==a.bankId);return(
-                <div key={a.id} className="pm-due-row" style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 20px",borderBottom:`1px solid ${C.surface}`}}>
-                  <div><div style={{fontSize:14,fontWeight:600,color:C.text}}>{a.terminalId}</div><div style={{fontSize:12,color:C.textMuted}}>{a.location} · {bank?.shortCode}</div></div>
-                  <div style={{textAlign:"right"}}><Badge label={a.status} color={statusColor(a.status)} bg={statusBg(a.status)}/><div style={{fontSize:11,color:C.textMuted,marginTop:3}}>{eng?.name}</div></div>
-                </div>
-              );})}
-            </div>
-            <Paginator page={pmPg} totalPages={pmTP} total={pmTotal} pageSize={PM_DUE_PAGE} setPage={setPmPg}/>
-            </>
-          )}
+          {engineerProgress.length===0
+            ? <div style={{padding:"24px 20px",textAlign:"center",color:C.textMuted,fontSize:13}}>No quarterly PMs are assigned to engineers for Q{selectedQuarter} {selectedYear}.</div>
+            : <div style={{padding:"8px 20px"}}>
+                {engineerProgress.map(({engineer,completed,total,percentage})=>{
+                  const color=percentage===100?C.green:percentage>0?C.teal:C.amber;
+                  return <div key={engineer.id} style={{padding:"12px 0",borderBottom:`1px solid ${C.surface}`}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:7}}>
+                      <span style={{fontSize:13,fontWeight:600,color:C.text}}>{engineer.name}</span>
+                      <span style={{fontSize:12,fontWeight:700,color}}>{percentage}% <span style={{fontWeight:500,color:C.textMuted}}>({completed}/{total})</span></span>
+                    </div>
+                    <div role="progressbar" aria-label={`${engineer.name} quarterly PM progress`} aria-valuenow={percentage} aria-valuemin={0} aria-valuemax={100} style={{height:8,borderRadius:6,background:C.surface,overflow:"hidden"}}>
+                      <div style={{height:"100%",width:`${percentage}%`,background:color,borderRadius:6,transition:"width .3s ease"}}/>
+                    </div>
+                  </div>;
+                })}
+              </div>}
         </Card>
       </div>
 
@@ -735,14 +957,65 @@ const Dashboard = ({atms,maintenance,engineers,banks,onBulkPM,pmBannerDismissed,
   );
 };
 
+const AdminNotifications = ({items,onNavigate}) => {
+  const [open,setOpen]=useState(false);
+  const [dismissed,setDismissed]=useState(new Set());
+  const visibleItems=items.filter(item=>item.count>0&&!dismissed.has(`${item.key}:${item.count}`));
+  const total=visibleItems.reduce((sum,item)=>sum+item.count,0);
+  return (
+    <div style={{position:"relative",flexShrink:0}}>
+      <button type="button" onClick={()=>setOpen(value=>!value)} aria-label={`Notifications${total?`, ${total} active items`:""}`} aria-expanded={open} style={{
+        position:"relative",width:36,height:36,borderRadius:18,background:"#fff",border:`1px solid ${C.border}`,
+        display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:C.textMid,cursor:"pointer",
+      }}>
+        🔔
+        {total>0&&<span style={{position:"absolute",top:-4,right:-5,minWidth:17,height:17,padding:"0 4px",borderRadius:10,background:C.red,color:"#fff",fontSize:10,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}}>{total>99?"99+":total}</span>}
+      </button>
+      {open&&<div role="dialog" aria-label="Notifications" style={{
+        position:"absolute",top:"calc(100% + 10px)",right:0,width:320,maxWidth:"calc(100vw - 28px)",
+        background:"#fff",border:`1px solid ${C.border}`,borderRadius:12,boxShadow:"0 12px 32px rgba(0,0,0,.14)",zIndex:600,overflow:"hidden",
+      }}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 14px",borderBottom:`1px solid ${C.border}`}}>
+          <strong style={{fontSize:13,color:C.text}}>Notifications</strong>
+          {visibleItems.length>0&&<span style={{fontSize:11,color:C.textMuted}}>{visibleItems.length} active</span>}
+        </div>
+        {visibleItems.length===0
+          ? <div style={{padding:"20px 14px",fontSize:13,color:C.textMuted,textAlign:"center"}}>You’re all caught up.</div>
+          : <div style={{maxHeight:360,overflowY:"auto"}}>
+              {visibleItems.map(item=>(
+                <div key={item.key} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 12px",borderBottom:`1px solid ${C.surface}`}}>
+                  <button type="button" onClick={()=>{onNavigate(item.page,item.filter);setOpen(false);}} style={{
+                    display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flex:1,minWidth:0,
+                    padding:0,textAlign:"left",border:0,background:"transparent",cursor:"pointer",fontFamily:"inherit",
+                  }}>
+                    <span style={{minWidth:0}}>
+                      <span style={{display:"block",fontSize:12,fontWeight:700,color:C.text}}>{item.label}</span>
+                      <span style={{display:"block",fontSize:11,color:C.textMuted,marginTop:2}}>{item.detail}</span>
+                    </span>
+                    <span style={{fontSize:15,fontWeight:800,color:C.amber,flexShrink:0}}>{item.count}</span>
+                  </button>
+                  <button type="button" onClick={()=>setDismissed(current=>new Set([...current,`${item.key}:${item.count}`]))} aria-label={`Dismiss ${item.label}`} title="Dismiss" style={{
+                    width:24,height:24,border:0,borderRadius:6,background:"transparent",color:C.textMuted,fontSize:17,cursor:"pointer",flexShrink:0,
+                  }}>×</button>
+                </div>
+              ))}
+            </div>}
+      </div>}
+    </div>
+  );
+};
+
 // ─── ATM List ─────────────────────────────────────────────────────────────────
-const AtmList = ({atms,engineers,banks,maintenance,onAdd,onEdit,onDelete,onView,onBulkPM,onBulkStatus,onBulkReassign,onBulkDelete}) => {
+const AtmList = ({atms,engineers,banks,maintenance,onAdd,onEdit,onDelete,onView,onBulkPM,onBulkStatus,onBulkGbna,onBulkReassign,onBulkDelete,initialFilter=""}) => {
   const [search,setSearch]=useState("");
-  const [fStatus,setFS]=useState("");
+  const [fStatus,setFS]=useState(initialFilter==="Offline"?"Offline":"");
   const [fBank,setFB]=useState("");
+  const [fEngineer,setFEngineer]=useState(initialFilter==="unassigned"?"unassigned":"");
   const [sel,setSel]=useState(new Set());
 
-  const filtered=atms.filter(a=>{const bank=banks.find(b=>b.id==a.bankId);const txt=`${a.terminalId} ${a.location} ${a.model} ${bank?.name}`.toLowerCase();return(!search||txt.includes(search.toLowerCase()))&&(!fStatus||a.status===fStatus)&&(!fBank||String(a.bankId)===fBank);});
+  const activeEngineerIds=new Set(engineers.map(engineer=>String(engineer.id)));
+  const isUnassigned=(atm)=>!atm.engineerId||!activeEngineerIds.has(String(atm.engineerId));
+  const filtered=atms.filter(a=>{const bank=banks.find(b=>b.id==a.bankId);const txt=`${a.terminalId} ${a.location} ${a.model} ${bank?.name}`.toLowerCase();return(!search||txt.includes(search.toLowerCase()))&&(!fStatus||a.status===fStatus)&&(!fBank||String(a.bankId)===fBank)&&(!fEngineer||(fEngineer==="unassigned"?isUnassigned(a):String(a.engineerId)===fEngineer));});
   const {page:atmPg,setPage:setAtmPg,totalPages:atmTP,slice:atmSlice,total:atmTotal}=usePagination(filtered);
   const toggleOne=(id)=>{const n=new Set(sel);n.has(id)?n.delete(id):n.add(id);setSel(n);};
   const toggleAll=(c)=>setSel(c?new Set(filtered.map(a=>a.id)):new Set());
@@ -762,6 +1035,11 @@ const AtmList = ({atms,engineers,banks,maintenance,onAdd,onEdit,onDelete,onView,
           <select value={fStatus} onChange={e=>setFS(e.target.value)} style={{padding:"8px 12px",borderRadius:8,border:`1.5px solid ${C.border}`,fontSize:14,fontFamily:"inherit",outline:"none",color:C.text,background:"#fff"}}>
             <option value="">All Statuses</option>{STATUSES.map(s=><option key={s}>{s}</option>)}
           </select>
+          <select aria-label="Filter by engineer" value={fEngineer} onChange={e=>setFEngineer(e.target.value)} style={{padding:"8px 12px",borderRadius:8,border:`1.5px solid ${C.border}`,fontSize:14,fontFamily:"inherit",outline:"none",color:C.text,background:"#fff"}}>
+            <option value="">All Engineers</option>
+            <option value="unassigned">Unassigned</option>
+            {engineers.map(engineer=><option key={engineer.id} value={engineer.id}>{engineer.name}</option>)}
+          </select>
           <Btn variant="teal" onClick={()=>onBulkPM([])}>⚡ Bulk PM</Btn>
           <Btn onClick={onAdd}>+ Add ATM</Btn>
         </div>
@@ -771,6 +1049,7 @@ const AtmList = ({atms,engineers,banks,maintenance,onAdd,onEdit,onDelete,onView,
         <BulkBar count={sel.size} onClear={()=>setSel(new Set())} actions={[
           {label:"Log PM",            icon:"📋", onClick:()=>onBulkPM(selAtms)},
           {label:"Update Status",     icon:"🔄", onClick:()=>onBulkStatus(selAtms)},
+          {label:"Add GBNA",          icon:"➕", onClick:()=>onBulkGbna(selAtms)},
           {label:"Reassign Engineer", icon:"👷", onClick:()=>onBulkReassign(selAtms)},
           {label:"Delete",            icon:"🗑", variant:"danger", onClick:()=>onBulkDelete(selAtms)},
         ]}/>
@@ -803,7 +1082,7 @@ const AtmList = ({atms,engineers,banks,maintenance,onAdd,onEdit,onDelete,onView,
                       <td style={{padding:"13px 16px"}}>{bank&&<span style={{background:col+"18",border:`1px solid ${col}30`,borderRadius:6,padding:"3px 8px",fontSize:12,fontWeight:700,color:col}}>{bank.shortCode}</span>}</td>
                       <td style={{padding:"13px 16px",fontSize:13,fontWeight:600,color:C.text}}>{atm.model}</td>
                       <td style={{padding:"13px 16px"}}><div style={{fontSize:13,fontWeight:600,color:C.text}}>{atm.location}</div><div style={{fontSize:11,color:C.textMuted}}>{atm.address}</div></td>
-                      <td style={{padding:"13px 16px"}}><div style={{fontSize:13,color:C.text}}>{eng?.name||"—"}</div><div style={{fontSize:11,color:C.textMuted}}>{eng?.region}</div></td>
+                      <td style={{padding:"13px 16px"}}><div style={{fontSize:13,color:C.text}}>{eng?.name||"Unassigned"}</div><div style={{fontSize:11,color:C.textMuted}}>{eng?.region}</div></td>
                       <td style={{padding:"13px 16px"}}><Badge label={atm.status} color={statusColor(atm.status)} bg={statusBg(atm.status)}/></td>
                       <td style={{padding:"13px 16px",fontSize:13,color:C.textMid}}>{fmt(atm.installDate)}</td>
                       <td style={{padding:"13px 16px"}}><div style={{display:"flex",gap:5}}><Btn small variant="ghost" onClick={()=>onView(atm)}>View</Btn><Btn small variant="secondary" onClick={()=>onEdit(atm)}>Edit</Btn><Btn small variant="danger" onClick={()=>onDelete(atm)}>Del</Btn></div></td>
@@ -861,18 +1140,19 @@ const AtmDetail = ({atm,engineers,banks,maintenance,onClose,onAddMaint}) => {
 };
 
 // ─── Maintenance Module ───────────────────────────────────────────────────────
-const MaintenanceModule = ({maintenance,atms,engineers,banks,onAdd,onEdit,onDelete,onBulkPM,onFilteredChange,onExport}) => {
+const MaintenanceModule = ({maintenance,atms,engineers,banks,onAdd,onEdit,onDelete,onBulkPM,onFilteredChange,onExport,initialFilter=""}) => {
   const [search,setSearch]=useState("");
   const [fStatus,setFS]=useState("");
+  const [overdueOnly,setOverdueOnly]=useState(initialFilter==="overdue");
   const [fQ,setFQ]=useState("");
-  const [fYear,setFY]=useState(String(today.getFullYear()));
+  const [fYear,setFY]=useState(initialFilter==="overdue"?"":String(today.getFullYear()));
   const [fBank,setFB]=useState("");
-  const filtered=maintenance.filter(m=>{const atm=atms.find(a=>a.id==m.atmId);const eng=engineers.find(e=>e.id==m.engineerId);const bank=banks.find(b=>b.id==atm?.bankId);const txt=`${atm?.terminalId} ${atm?.location} ${eng?.name} ${m.type} ${bank?.name}`.toLowerCase();return(!search||txt.includes(search.toLowerCase()))&&(!fStatus||m.status===fStatus)&&(!fQ||String(m.quarter)===fQ)&&(!fYear||String(m.year)===fYear)&&(!fBank||String(atm?.bankId)===fBank);}).sort((a,b)=>new Date(b.scheduledDate)-new Date(a.scheduledDate));
+  const filtered=maintenance.filter(m=>{const atm=atms.find(a=>a.id==m.atmId);const eng=engineers.find(e=>e.id==m.engineerId);const bank=banks.find(b=>b.id==atm?.bankId);const txt=`${atm?.terminalId} ${atm?.location} ${eng?.name} ${m.type} ${bank?.name}`.toLowerCase();return(!search||txt.includes(search.toLowerCase()))&&(!fStatus||m.status===fStatus)&&(!overdueOnly||(["Scheduled","In Progress"].includes(m.status)&&Boolean(m.scheduledDate)&&m.scheduledDate<fmtISO(today)))&&(!fQ||String(m.quarter)===fQ)&&(!fYear||String(m.year)===fYear)&&(!fBank||String(atm?.bankId)===fBank);}).sort((a,b)=>new Date(b.scheduledDate)-new Date(a.scheduledDate));
   const {page:mp,setPage:setMP,totalPages:mTP,slice:mSlice,total:mTotal}=usePagination(filtered);
   // Notify parent whenever filtered set changes so nav-bar export always reflects current view
   const prevFilterKey = useRef("");
-  const filterKey = `${search}|${fStatus}|${fQ}|${fYear}|${fBank}|${maintenance.length}`;
-  if (filterKey !== prevFilterKey.current) { prevFilterKey.current = filterKey; onFilteredChange?.(filtered, {search,fStatus,fQ,fYear,fBank}); }
+  const filterKey = `${search}|${fStatus}|${overdueOnly}|${fQ}|${fYear}|${fBank}|${maintenance.length}`;
+  if (filterKey !== prevFilterKey.current) { prevFilterKey.current = filterKey; onFilteredChange?.(filtered, {search,fStatus,overdueOnly,fQ,fYear,fBank}); }
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
@@ -900,7 +1180,7 @@ const MaintenanceModule = ({maintenance,atms,engineers,banks,onAdd,onEdit,onDele
           {Array.from(new Set(maintenance.map(m=>String(m.year)))).sort((a,b)=>Number(b)-Number(a)).map(y=><option key={y} value={y}>{y}</option>)}
         </select>
         <select value={fQ} onChange={e=>setFQ(e.target.value)} style={{padding:"8px 12px",borderRadius:8,border:`1.5px solid ${C.border}`,fontSize:14,fontFamily:"inherit",outline:"none",color:C.text,background:"#fff"}}><option value="">All Quarters</option>{["1","2","3","4"].map(q=><option key={q} value={q}>Q{q}</option>)}</select>
-        {(fYear||fQ||fStatus||fBank||search)&&<button onClick={()=>{setSearch("");setFS("");setFQ("");setFY("");setFB("");}} style={{padding:"8px 12px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:13,fontFamily:"inherit",color:C.textMuted,cursor:"pointer"}}>✕ Clear</button>}
+        {(fYear||fQ||fStatus||overdueOnly||fBank||search)&&<button onClick={()=>{setSearch("");setFS("");setOverdueOnly(false);setFQ("");setFY("");setFB("");}} style={{padding:"8px 12px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:13,fontFamily:"inherit",color:C.textMuted,cursor:"pointer"}}>✕ Clear</button>}
       </div>
       <Card>
         {filtered.length===0?<EmptyState message="No records found"/>:(
@@ -1055,7 +1335,7 @@ const EngineersModule = ({engineers,atms,banks,onAdd,onEdit,onDelete}) => {
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App(props: PageProps) {
-  const { atms: rawAtms, banks: rawBanks, engineers: rawEngineers, maintenance: rawMaint } = usePage<PageProps>().props;
+  const { atms: rawAtms, banks: rawBanks, engineers: rawEngineers, maintenance: rawMaint, approvedPmCards: rawApprovedPmCards, pendingJobCardsCount } = usePage<PageProps>().props;
 
   const atms        = (rawAtms        || []).map(normAtm);
   const banks       = (rawBanks       || []).map(normBank);
@@ -1063,29 +1343,35 @@ export default function App(props: PageProps) {
   const maintenance = (rawMaint       || []).map(normMaint);
 
   const [page,setPage]           = useState("dashboard");
+  const [sectionFocus,setSectionFocus] = useState<{page:string;filter:string}|null>(null);
   const [modal,setModal]         = useState(null);
   const [bulkModal,setBulkModal] = useState(null);
   const [pendingCalls,setPendingCalls] = useState(0);
+  const [slaBreachedCalls,setSlaBreachedCalls] = useState(0);
 
-  // Poll pending call count every 60s
+  // Refresh dashboard call KPIs every 60 seconds.
   useEffect(() => {
-    const fetchPending = async () => {
+    const fetchCallSummary = async () => {
       try {
-        const res = await fetch("/calls?status=pending", {
+        const res = await fetch("/calls?summary=1", {
           headers:{Accept:"application/json","X-Requested-With":"XMLHttpRequest"},
           credentials:"same-origin",
         });
-        if (res.ok) { const d = await res.json(); setPendingCalls(Array.isArray(d)?d.length:0); }
-      } catch {}
+        if (!res.ok) throw new Error(`Failed to load call summary (${res.status})`);
+        const summary = await res.json();
+        setPendingCalls(Number(summary.pending)||0);
+        setSlaBreachedCalls(Number(summary.sla_breached)||0);
+      } catch (error) {
+        console.error("Unable to refresh admin call summary", error);
+      }
     };
-    fetchPending();
-    const t = setInterval(fetchPending, 60000);
+    fetchCallSummary();
+    const t = setInterval(fetchCallSummary, 60000);
     return () => clearInterval(t);
   }, []);
   const [confirm,setConfirm]     = useState(null);
   const [viewAtm,setViewAtm]     = useState(null);
   const { toast, ToastContainer } = useToast();
-  const [pmBannerDismissed, setPmBannerDismissed] = useState(false);
   const [processing, setProcessing] = useState(false);
   // Lifted from MaintenanceModule so nav bar export always has current filtered set
   const [exportableMaint, setExportableMaint] = useState<{records:any[];meta:any}>({records:[],meta:{search:"",fStatus:"",fQ:"",fBank:""}});
@@ -1123,7 +1409,7 @@ export default function App(props: PageProps) {
 
   // ATM CRUD
   const saveAtm = useCallback((f) => {
-    const payload = { terminal_id:f.terminalId, serial_number:f.serialNumber, model:f.model, location:f.location, address:f.address, bank_id:f.bankId, engineer_id:f.engineerId, status:f.status, install_date:f.installDate, notes:f.notes };
+    const payload = { terminal_id:f.terminalId, serial_number:f.serialNumber, model:f.model, location:f.location, address:f.address, bank_id:f.bankId, engineer_id:f.engineerId, status:f.status, has_gbna:f.hasGbna, install_date:f.installDate, notes:f.notes };
     if (f.id) {
       router.put(`/atms/${f.id}`, payload, opts(() => { toast(`ATM ${f.terminalId} updated`, "success"); closeModal(); }));
     } else {
@@ -1141,6 +1427,14 @@ export default function App(props: PageProps) {
   const handleBulkStatus = useCallback((sel, ns) => {
     router.post("/atms/bulk-status", { ids: sel.map(a => a.id), status: ns },
       opts(() => { toast(`${sel.length} ATM${sel.length!==1?"s":""} set to "${ns}"`, "success"); closeBulk(); }));
+  }, [toast]);
+
+  const handleBulkGbna = useCallback((sel) => {
+    setConfirm({
+      message: `Enable GBNA for ${sel.length} selected ATM${sel.length!==1?"s":""}?`,
+      onConfirm: () => router.post("/atms/bulk-gbna", { ids: sel.map(a => a.id) },
+        opts(() => { toast(`GBNA enabled for ${sel.length} ATM${sel.length!==1?"s":""}`, "success"); setConfirm(null); })),
+    });
   }, [toast]);
 
   const handleBulkReassign = useCallback((sel, eid) => {
@@ -1169,10 +1463,10 @@ export default function App(props: PageProps) {
     }});
   }, [toast]);
 
-  const handleBulkPM = useCallback((records) => {
+  const handleBulkPM = useCallback((records, onSuccess) => {
     const payload = records.map(r => ({ atm_id:r.atmId, engineer_id:r.engineerId, type:r.type, status:r.status, scheduled_date:r.scheduledDate, completed_date:r.completedDate||null, quarter:r.quarter, year:r.year, notes:r.notes }));
     router.post("/maintenance/bulk", { records: payload },
-      opts(() => { toast(`${records.length} PM record${records.length!==1?"s":""} logged successfully`, "success"); }));
+      opts(() => { toast(`${records.length} PM record${records.length!==1?"s":""} updated successfully`, "success"); onSuccess?.(); }));
   }, [toast]);
 
   // Engineer CRUD
@@ -1197,7 +1491,19 @@ export default function App(props: PageProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [passModalOpen, setPassModalOpen] = useState(false);
-  const navigate = (id) => { setPage(id); setDrawerOpen(false); };
+  const navigate = (id,filter="") => {
+    setPage(id);
+    setSectionFocus(filter?{page:id,filter}:null);
+    setDrawerOpen(false);
+  };
+  const activeEngineerIds=new Set(engineers.map(engineer=>String(engineer.id)));
+  const attentionItems=[
+    {key:"jobcards",label:"Job cards need review",count:pendingJobCardsCount||0,detail:"Submitted by engineers",page:"jobcards"},
+    {key:"calls",label:"Calls pending",count:pendingCalls,detail:"Awaiting assignment",page:"calls",filter:"pending"},
+    {key:"overdue",label:"Overdue PMs",count:maintenance.filter(record=>record.type==="Quarterly PM"&&["Scheduled","In Progress"].includes(record.status)&&Boolean(record.scheduledDate)&&record.scheduledDate<fmtISO(today)).length,detail:"Scheduled date has passed",page:"maintenance",filter:"overdue"},
+    {key:"unassigned",label:"Unassigned ATMs",count:atms.filter(atm=>!atm.engineerId||!activeEngineerIds.has(String(atm.engineerId))).length,detail:"No active engineer assigned",page:"atms",filter:"unassigned"},
+    {key:"offline",label:"Offline ATMs",count:atms.filter(atm=>atm.status==="Offline").length,detail:"Currently not operational",page:"atms",filter:"Offline"},
+  ];
 
   // Auth user from Inertia shared props
   const { auth } = usePage().props as any;
@@ -1217,30 +1523,28 @@ export default function App(props: PageProps) {
           </div>
           <div className="nav-links">
             {navItemsMain.map(n=>(
-              <button key={n.id} onClick={()=>setPage(n.id)} className="nav-link"
+              <button key={n.id} onClick={()=>navigate(n.id)} className="nav-link"
                 style={{position:"relative",background:page===n.id?"#fff":"transparent",fontWeight:page===n.id?700:500,color:page===n.id?C.accent:C.textMid,boxShadow:page===n.id?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
                 <span className="nav-link__icon">{n.icon}</span>{n.label}
                 {navBadge(n.id)&&<span style={{position:"absolute",top:4,right:4,background:C.red,color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,minWidth:16,height:16,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 3px",lineHeight:1}}>{navBadge(n.id)}</span>}
               </button>
             ))}
           </div>
-          {/* ── Clickable Banks + Engineers counter chips ── */}
-          <div style={{display:"flex",gap:6,alignItems:"center",marginLeft:"auto"}}>
+          <div className="admin-nav-actions">
             {[
-              {id:"banks",     label:"Banks",     count:banks.length,     icon:"🏦", color:C.purple, bg:"#f3e8ff"},
-              {id:"engineers", label:"Engineers", count:engineers.length,  icon:"👷", color:C.teal,   bg:C.tealLight},
+              {id:"banks",label:"Banks",count:banks.length,icon:"🏦",color:C.purple,bg:"#f3e8ff"},
+              {id:"engineers",label:"Engineers",count:engineers.length,icon:"👷",color:C.teal,bg:C.tealLight},
             ].map(chip=>(
-              <button key={chip.id} onClick={()=>setPage(chip.id)} style={{
-                display:"flex",alignItems:"center",gap:6,padding:"5px 10px 5px 8px",
-                borderRadius:20,cursor:"pointer",fontFamily:"inherit",
-                background:page===chip.id?chip.color:chip.bg,
-                border:`1px solid ${chip.color}33`,transition:"all .15s",
+              <button key={chip.id} onClick={()=>navigate(chip.id)} style={{
+                display:"flex",alignItems:"center",gap:6,padding:"5px 10px 5px 8px",borderRadius:20,cursor:"pointer",
+                fontFamily:"inherit",background:page===chip.id?chip.color:chip.bg,border:`1px solid ${chip.color}33`,transition:"all .15s",
               }}>
                 <span style={{fontSize:14,lineHeight:1}}>{chip.icon}</span>
                 <span style={{fontSize:12,fontWeight:700,color:page===chip.id?"#fff":chip.color}}>{chip.count}</span>
                 <span style={{fontSize:11,fontWeight:500,color:page===chip.id?"rgba(255,255,255,.85)":chip.color}}>{chip.label}</span>
               </button>
             ))}
+            <AdminNotifications items={attentionItems} onNavigate={navigate}/>
           </div>
           {/* ── Profile circle ── */}
           <div style={{position:"relative"}}>
@@ -1288,7 +1592,7 @@ export default function App(props: PageProps) {
           <div className="mobile-topbar__icon" style={{background:C.accent}}>🏧</div>
           <div className="mobile-topbar__title" style={{color:C.text}}>NCR Fleet</div>
         </div>
-        <div style={{width:36}}/>
+        <AdminNotifications items={attentionItems} onNavigate={navigate}/>
       </div>
 
       {/* ── MOBILE DRAWER ── */}
@@ -1300,14 +1604,6 @@ export default function App(props: PageProps) {
             <div><div className="drawer-logo__name" style={{color:C.text}}>NCR Fleet</div><div className="drawer-logo__sub" style={{color:C.textMuted}}>ATM Manager</div></div>
           </div>
           <button onClick={()=>setDrawerOpen(false)} className="drawer-close" style={{color:C.textMuted}}>×</button>
-        </div>
-        <div className="drawer-stats">
-          {[[banks.length,"Banks",C.purple,C.purpleLight],[atms.length,"ATMs",C.accent,C.accentLight],[atms.filter(a=>a.status==="Active").length,"Active",C.green,C.greenLight]].map(([v,l,c,bg])=>(
-            <div key={l} style={{flex:1,background:bg,borderRadius:10,padding:"10px 12px",textAlign:"center"}}>
-              <div style={{fontSize:20,fontWeight:800,color:c}}>{v}</div>
-              <div style={{fontSize:11,fontWeight:600,color:c,marginTop:1}}>{l}</div>
-            </div>
-          ))}
         </div>
         <nav className="drawer-nav">
           <div className="drawer-nav__label" style={{color:C.textMuted}}>Navigation</div>
@@ -1341,22 +1637,23 @@ export default function App(props: PageProps) {
 
       {/* ── MAIN CONTENT ── */}
       <main className="main-content">
-        {page==="dashboard"   &&<Dashboard   atms={atms} maintenance={maintenance} engineers={engineers} banks={banks} onBulkPM={()=>setBulkModal({type:"bulkPM",atms:[]})} pmBannerDismissed={pmBannerDismissed} onDismissPMBanner={()=>{ setPmBannerDismissed(true); toast("PM reminder dismissed","info"); }}/>}
+        {page==="dashboard"   &&<Dashboard   atms={atms} maintenance={maintenance} approvedPmCards={rawApprovedPmCards||[]} engineers={engineers} banks={banks} pendingCalls={pendingCalls} slaBreachedCalls={slaBreachedCalls} onNavigate={navigate} onBulkPM={()=>setBulkModal({type:"bulkPM",atms:[]})} toast={toast}/>}
         {page==="banks"       &&<BanksModule banks={banks} atms={atms} onAdd={()=>setModal({type:"bank"})} onEdit={b=>setModal({type:"bank",data:b})} onDelete={deleteBank}/>}
-        {page==="atms"        &&<AtmList     atms={atms} engineers={engineers} banks={banks} maintenance={maintenance}
+        {page==="atms"        &&<AtmList     atms={atms} engineers={engineers} banks={banks} maintenance={maintenance} initialFilter={sectionFocus?.page==="atms"?sectionFocus.filter:""}
             onAdd={()=>setModal({type:"atm"})} onEdit={a=>setModal({type:"atm",data:a})} onDelete={deleteAtm} onView={setViewAtm}
             onBulkPM={sel=>setBulkModal({type:"bulkPM",atms:sel})}
             onBulkStatus={sel=>setBulkModal({type:"bulkStatus",atms:sel})}
+            onBulkGbna={handleBulkGbna}
             onBulkReassign={sel=>setBulkModal({type:"bulkReassign",atms:sel})}
             onBulkDelete={sel=>setBulkModal({type:"bulkDelete",atms:sel})}/>}
-        {page==="maintenance" &&<MaintenanceModule maintenance={maintenance} atms={atms} engineers={engineers} banks={banks}
+        {page==="maintenance" &&<MaintenanceModule maintenance={maintenance} atms={atms} engineers={engineers} banks={banks} initialFilter={sectionFocus?.page==="maintenance"?sectionFocus.filter:""}
             onAdd={()=>setModal({type:"maint"})} onEdit={m=>setModal({type:"maint",data:m})} onDelete={deleteMaint}
             onBulkPM={()=>setBulkModal({type:"bulkPM",atms:[]})}
             onFilteredChange={(records,meta)=>setExportableMaint({records,meta})}
             onExport={handleExportPDF}/>}
         {page==="engineers"   &&<EngineersModule   engineers={engineers} atms={atms} banks={banks} onAdd={()=>setModal({type:"eng"})} onEdit={e=>setModal({type:"eng",data:e})} onDelete={deleteEng}/>}
-        {page==="jobcards"    &&<JobCardsModule    atms={atms} engineers={engineers} banks={banks}/>}
-        {page==="calls"       &&<CallsModule       atms={rawAtms||[]} engineers={engineers} banks={banks}/>}
+        {page==="jobcards"    &&<JobCardsModule    atms={atms} engineers={engineers} banks={banks} onApproved={()=>router.reload({only:["maintenance","approvedPmCards"]})}/>}
+        {page==="calls"       &&<CallsModule       atms={rawAtms||[]} engineers={engineers} banks={banks} initialFilter={sectionFocus?.page==="calls"?sectionFocus.filter:"all"}/>}
       </main>
 
       {/* ── MOBILE BOTTOM NAV ── */}

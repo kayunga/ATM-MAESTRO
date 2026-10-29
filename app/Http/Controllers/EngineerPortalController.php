@@ -87,10 +87,12 @@ class EngineerPortalController extends Controller
         $atms = $engineer->atms()->with('bank')->get()->map(fn($a) => [
             'id'          => $a->id,
             'terminal_id' => $a->terminal_id,
+            'serial_number' => $a->serial_number,
             'model'       => $a->model,
             'location'    => $a->location,
             'address'     => $a->address,
             'status'      => $a->status,
+            'has_gbna'    => $a->has_gbna,
             'bank'        => [
                 'id'         => $a->bank->id,
                 'name'       => $a->bank->name,
@@ -149,6 +151,7 @@ class EngineerPortalController extends Controller
                 'email'    => $user->email,
                 'phone'    => $engineer->phone,
                 'region'   => $engineer->region,
+                'signature' => $engineer->signature,
                 'is_admin' => $user->is_admin,  // elevated engineer flag
             ],
             'atms'           => $atms,
@@ -157,6 +160,18 @@ class EngineerPortalController extends Controller
             'currentQuarter' => $currentQuarter,
             'currentYear'    => $currentYear,
         ]);
+    }
+
+    public function updateSignature(Request $request)
+    {
+        $engineer = Engineer::where('user_id', Auth::id())->firstOrFail();
+        $data = $request->validate([
+            'signature' => ['nullable', 'string', 'max:500000', 'regex:/\Adata:image\/png;base64,[A-Za-z0-9+\/]+=*\z/'],
+        ]);
+
+        $engineer->update(['signature' => $data['signature'] ?? null]);
+
+        return redirect()->route('engineer.portal')->with('success', 'Engineer signature updated.');
     }
 
     // ── Store Job Card ────────────────────────────────────────────────────────
@@ -168,7 +183,19 @@ class EngineerPortalController extends Controller
         $data = $request->validate([
             'atm_id'           => ['required', 'exists:atms,id'],
             'type'             => ['required', 'string'],
+            'job_type'         => ['nullable', 'in:repair,maintenance'],
             'work_description' => ['required', 'string'],
+            'fault_category'   => ['required_if:job_type,repair', 'nullable', 'string', 'max:100'],
+            'checklist'        => ['required_if:job_type,maintenance', 'nullable', 'array'],
+            'checklist.*'      => ['array'],
+            'checklist.*.*'    => ['required', 'in:ok,na,nr,fail'],
+            'atm_status'       => ['required_if:job_type,repair,maintenance', 'nullable', 'in:In Service,Out of Service,Pending Parts'],
+            'start_time'       => ['required_if:job_type,repair,maintenance', 'nullable', 'date_format:H:i'],
+            'end_time'         => ['required_if:job_type,repair,maintenance', 'nullable', 'date_format:H:i'],
+            'custodian1_name'  => ['required_if:job_type,repair,maintenance', 'nullable', 'string', 'max:255'],
+            'custodian1_signature' => ['required_if:job_type,repair,maintenance', 'nullable', 'string', 'max:500000'],
+            'custodian2_name'  => ['nullable', 'required_with:custodian2_signature', 'string', 'max:255'],
+            'custodian2_signature' => ['nullable', 'required_with:custodian2_name', 'string', 'max:500000'],
             'parts_used'       => ['nullable', 'string'],
             'hours_spent'      => ['required', 'numeric', 'min:0', 'max:24'],
             'scheduled_date'   => ['required', 'date'],
@@ -182,6 +209,9 @@ class EngineerPortalController extends Controller
         ]);
 
         $submitNow   = filter_var($request->input('submit_now'), FILTER_VALIDATE_BOOLEAN);
+        if ($submitNow && in_array($data['job_type'] ?? null, ['repair', 'maintenance'], true) && !$engineer->signature) {
+            return back()->withErrors(['signature' => 'Add your engineer signature in your profile before submitting a job card.']);
+        }
         $attachments = [];
 
         if ($request->hasFile('files')) {
@@ -200,7 +230,18 @@ class EngineerPortalController extends Controller
             'atm_id'           => $data['atm_id'],
             'engineer_id'      => $engineer->id,
             'type'             => $data['type'],
+            'job_type'         => $data['job_type'] ?? null,
             'work_description' => $data['work_description'],
+            'fault_category'   => $data['fault_category'] ?? null,
+            'checklist'        => $data['checklist'] ?? null,
+            'atm_status'       => $data['atm_status'] ?? null,
+            'start_time'       => $data['start_time'] ?? null,
+            'end_time'         => $data['end_time'] ?? null,
+            'technician_signature' => $submitNow ? $engineer->signature : null,
+            'custodian1_name'  => $data['custodian1_name'] ?? null,
+            'custodian1_signature' => $data['custodian1_signature'] ?? null,
+            'custodian2_name'  => $data['custodian2_name'] ?? null,
+            'custodian2_signature' => $data['custodian2_signature'] ?? null,
             'parts_used'       => $data['parts_used'] ?? null,
             'hours_spent'      => $data['hours_spent'],
             'scheduled_date'   => $data['scheduled_date'],
@@ -227,7 +268,17 @@ class EngineerPortalController extends Controller
         abort_if($jobCard->engineer_id !== $engineer->id, 403);
         abort_if($jobCard->status !== 'draft', 422, 'Only drafts can be submitted.');
 
-        $jobCard->update(['status' => 'submitted', 'submitted_at' => now()]);
+        if (in_array($jobCard->job_type, ['repair', 'maintenance'], true) && !$engineer->signature) {
+            return back()->withErrors(['signature' => 'Add your engineer signature in your profile before submitting a job card.']);
+        }
+
+        $jobCard->update([
+            'status' => 'submitted',
+            'submitted_at' => now(),
+            'technician_signature' => in_array($jobCard->job_type, ['repair', 'maintenance'], true)
+                ? $engineer->signature
+                : $jobCard->technician_signature,
+        ]);
 
         return redirect()->route('engineer.portal')->with('success', 'Job card submitted for review.');
     }
@@ -253,7 +304,19 @@ class EngineerPortalController extends Controller
             'id'               => $card->id,
             'status'           => $card->status,
             'type'             => $card->type,
+            'job_type'         => $card->job_type,
             'work_description' => $card->work_description,
+            'fault_category'   => $card->fault_category,
+            'checklist'        => $card->checklist ?? [],
+            'atm_status'       => $card->atm_status,
+            'phone_support'    => $card->phone_support,
+            'start_time'       => $card->start_time,
+            'end_time'         => $card->end_time,
+            'technician_signature' => $card->technician_signature,
+            'custodian1_name'  => $card->custodian1_name,
+            'custodian1_signature' => $card->custodian1_signature,
+            'custodian2_name'  => $card->custodian2_name,
+            'custodian2_signature' => $card->custodian2_signature,
             'parts_used'       => $card->parts_used,
             'hours_spent'      => $card->hours_spent,
             'scheduled_date'   => $card->scheduled_date?->format('Y-m-d'),

@@ -2,16 +2,22 @@
 /* eslint-disable */
 import { useState, useEffect, useCallback, useRef } from "react";
 import { router } from "@inertiajs/react";
+import "./engineer-job-cards.css";
 
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-interface Engineer  { id:number; name:string; email:string; phone?:string; region:string; }
+interface Engineer  { id:number; name:string; email:string; phone?:string; region:string; signature?:string|null; }
 interface Bank      { id:number; name:string; short_code:string; }
-interface Atm       { id:number; terminal_id:string; model:string; location:string; address?:string; status:string; bank:Bank; }
+interface Atm       { id:number; terminal_id:string; serial_number?:string; model:string; location:string; address?:string; status:string; has_gbna?:boolean; bank:Bank; }
 interface Attachment{ name:string; path:string; type:string; size:number; url:string; is_image:boolean; is_pdf:boolean; }
 interface JobCard   {
   id:number; status:"draft"|"submitted"|"approved"|"rejected";
-  type:string; work_description:string; parts_used?:string;
+  type:string; job_type?:string; work_description:string; parts_used?:string;
+  fault_category?:string; checklist?:Record<string,string[]>; atm_status?:string;
+  phone_support?:boolean;
+  start_time?:string; end_time?:string; technician_signature?:string;
+  custodian1_name?:string; custodian1_signature?:string;
+  custodian2_name?:string; custodian2_signature?:string;
   hours_spent:number; scheduled_date:string; completed_date?:string;
   quarter:number; year:number; notes?:string; rejection_reason?:string;
   attachments:Attachment[]; submitted_at?:string; reviewed_at?:string; created_at:string;
@@ -71,6 +77,15 @@ const PM_BG:any        = {Completed:C.successLight,Scheduled:C.warningLight,"In 
 function fmt(d?:string|null) {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});
+}
+function localDateTimeValue(date=new Date()) {
+  return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
+}
+function localDateValue(date=new Date()) {
+  return localDateTimeValue(date).slice(0,10);
+}
+function localTimeValue(date=new Date()) {
+  return localDateTimeValue(date).slice(11,16);
 }
 function fileSize(b:number) {
   if (b<1024) return `${b}B`;
@@ -290,154 +305,252 @@ const AttachmentList = ({attachments}:{attachments:Attachment[]}) => {
   );
 };
 
-// ─── Job Card Form ─────────────────────────────────────────────────────────────
-const JobCardForm = ({atms,onSave,onClose,initialAtmId=null,initialType="Quarterly PM"}:any) => {
-  const [form,setForm] = useState({
-    atm_id:initialAtmId??"", type:initialType,
-    work_description:"", parts_used:"", hours_spent:"",
-    scheduled_date:now.toISOString().slice(0,10),
-    completed_date:now.toISOString().slice(0,10),
-    quarter:String(currentQ), year:String(now.getFullYear()), notes:"",
-  });
-  const [files,setFiles]   = useState<File[]>([]);
-  const [saving,setSaving] = useState(false);
-  const set = (k:any)=>(v:any)=>setForm(f=>({...f,[k]:v}));
-  const selectedAtm = atms.find((a:Atm)=>String(a.id)===String(form.atm_id));
+// ─── PM / repair job-card forms ───────────────────────────────────────────────
+const PM_CHECKLIST = [
+  { key:"canopyHood", title:"TOP BOX / CANOPY", items:[
+    "Encrypting PIN pad and FDKs working",
+    "Card reader: cleaned, transport clear, test transaction done",
+    "Journal printer cleaned, print legible",
+    "Receipt printer cleaned and working",
+    "PC Core: opened and cleaned",
+  ]},
+  { key:"cashDispenser", title:"Cash Dispenser Modules", items:[
+    "All cassettes working (self-test run, notes learned)",
+    "All pick modules / slots working",
+    "D-wheel timing and status of all pick lines checked",
+    "Carriage, Bill Aligner Module and SNT checked & cleaned",
+    "Worn suction cups replaced",
+    "Filter replaced",
+    "Exit shutter cleaned",
+  ]},
+  { key:"gbna", title:"GBNA Module", items:[
+    "Pre-acceptor cleaned, status checked",
+    "Cassettes accepting notes for configured denominations",
+    "Escrow / reservoir and bill validator cleaned and checked",
+    "Transport test: upper, lower and exit shutter",
+  ]},
+  { key:"atmRoom", title:"ATM Room", items:[
+    "Inverter / UPS installed and working",
+    "Air conditioner installed and working",
+  ]},
+];
+const atmOptionLabel=(atm:Atm)=>`${atm.terminal_id} · ${atm.location} (${atm.bank.short_code})`;
+const ChecklistItemText=({item}:{item:string})=>item.startsWith("PC Core:")
+  ? <><strong>PC Core</strong>{item.slice("PC Core".length)}</>
+  : <>{item}</>;
+const PM_ANSWERS = [
+  ["ok","Done"],["na","N/A"],["nr","No action needed"],["fail","Not OK"],
+];
+const VISIT_STATUS = ["In Service","Out of Service","Pending Parts"];
 
-  const submit = (submitNow:boolean) => {
-    if (!form.atm_id)                  { alert("Please select an ATM."); return; }
-    if (!form.work_description.trim()) { alert("Please describe the work performed."); return; }
+const SignaturePad = ({value,onChange,label}:any) => {
+  const canvasRef=useRef<HTMLCanvasElement|null>(null);
+  const drawing=useRef(false);
+  useEffect(()=>{
+    const canvas=canvasRef.current;
+    if(!canvas)return;
+    const context=canvas.getContext("2d");
+    if(!context)return;
+    context.clearRect(0,0,600,150);
+    if(value){
+      const image=new Image();
+      image.onload=()=>context.drawImage(image,0,0,600,150);
+      image.src=value;
+    }
+  },[value]);
+  const point=(event:React.PointerEvent<HTMLCanvasElement>)=>{
+    const rect=event.currentTarget.getBoundingClientRect();
+    return {x:(event.clientX-rect.left)*600/rect.width,y:(event.clientY-rect.top)*150/rect.height};
+  };
+  const start=(event:React.PointerEvent<HTMLCanvasElement>)=>{
+    event.preventDefault();
+    const context=event.currentTarget.getContext("2d");
+    if(!context)return;
+    const p=point(event);
+    drawing.current=true;
+    context.beginPath();
+    context.moveTo(p.x,p.y);
+    context.lineWidth=2.4;
+    context.lineCap="round";
+    context.strokeStyle="#132433";
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const move=(event:React.PointerEvent<HTMLCanvasElement>)=>{
+    if(!drawing.current)return;
+    const context=event.currentTarget.getContext("2d");
+    if(!context)return;
+    const p=point(event);
+    context.lineTo(p.x,p.y);
+    context.stroke();
+  };
+  const end=(event:React.PointerEvent<HTMLCanvasElement>)=>{
+    if(!drawing.current)return;
+    drawing.current=false;
+    onChange(event.currentTarget.toDataURL("image/png"));
+  };
+  const clear=()=>{
+    const canvas=canvasRef.current;
+    const context=canvas?.getContext("2d");
+    if(!canvas||!context)return;
+    context.clearRect(0,0,600,150);
+    onChange("");
+  };
+  return <div>
+    <label style={labelStyle}>{label}</label>
+    <canvas ref={canvasRef} width={600} height={150} onPointerDown={start} onPointerMove={move}
+      onPointerUp={end} onPointerCancel={end}
+      style={{width:"100%",height:110,display:"block",touchAction:"none",background:"#fff",border:`1px solid ${C.border}`,borderRadius:8}}/>
+    <button type="button" onClick={clear} style={{marginTop:6,padding:0,border:0,background:"none",color:C.primary,fontWeight:700,cursor:"pointer"}}>Clear signature</button>
+  </div>;
+};
+
+const JobCardForm = ({atms,onSave,onClose,initialAtmId=null}:any) => {
+  const [atmSearch,setAtmSearch]=useState(()=>{
+    const initialAtm=atms.find((atm:Atm)=>String(atm.id)===String(initialAtmId));
+    return initialAtm?atmOptionLabel(initialAtm):"";
+  });
+  const [form,setForm]=useState<any>({
+    atm_id:initialAtmId??"",service_date:localDateValue(),start_time:"",end_time:"",
+    atm_status:"In Service",notes:"",
+    checklist:Object.fromEntries(PM_CHECKLIST.map(section=>[section.key,section.items.map(()=>null)])),
+    custodian1_name:"",custodian1_signature:"",custodian2_name:"",custodian2_signature:"",
+  });
+  const [files,setFiles]=useState<File[]>([]);
+  const [saving,setSaving]=useState(false);
+  const [attempted,setAttempted]=useState(false);
+  const set=(key:string)=>(value:any)=>setForm((current:any)=>({...current,[key]:value}));
+  const selectedAtm=atms.find((atm:Atm)=>String(atm.id)===String(form.atm_id));
+  const searchAtm=(value:string)=>{
+    setAtmSearch(value);
+    const match=atms.find((atm:Atm)=>atmOptionLabel(atm).toLocaleLowerCase()===value.trim().toLocaleLowerCase());
+    set("atm_id")(match?.id??"");
+  };
+  const sections=PM_CHECKLIST.filter(section=>section.key!=="gbna"||selectedAtm?.has_gbna);
+  const setChecklist=(section:string,index:number,value:string)=>setForm((current:any)=>({
+    ...current,checklist:{...current.checklist,[section]:current.checklist[section].map((answer:string|null,i:number)=>i===index?value:answer)},
+  }));
+  const markSectionDone=(section:string)=>setForm((current:any)=>({
+    ...current,
+    checklist:{
+      ...current.checklist,
+      [section]:current.checklist[section].map((answer:string|null)=>answer||"ok"),
+    },
+  }));
+  const checklistComplete=sections.every(section=>form.checklist[section.key]?.every(Boolean));
+  const valid=!!form.atm_id&&!!form.service_date&&!!form.start_time&&!!form.end_time
+    &&!!form.custodian1_name.trim()&&!!form.custodian1_signature
+    &&checklistComplete
+    &&(!form.custodian2_name.trim()||!!form.custodian2_signature)
+    &&(!form.custodian2_signature||!!form.custodian2_name.trim());
+
+  const submit=(submitNow:boolean)=>{
+    setAttempted(true);
+    if(!valid)return;
     setSaving(true);
-    const fd = new FormData();
-    Object.entries(form).forEach(([k,v])=>fd.append(k,String(v)));
-    fd.append('submit_now', submitNow?'1':'0');
-    files.forEach(f=>fd.append('files[]',f));
-    router.post('/engineer/job-cards', fd, {
+    const serviceDate=new Date(`${form.service_date}T00:00:00`);
+    const [startHour,startMinute]=form.start_time.split(":").map(Number);
+    const [endHour,endMinute]=form.end_time.split(":").map(Number);
+    let minutes=(endHour*60+endMinute)-(startHour*60+startMinute);
+    if(minutes<0)minutes+=24*60;
+    const hours=Math.round(minutes/6)/10;
+    const fd=new FormData();
+    fd.append("atm_id",String(form.atm_id));
+    fd.append("type","Quarterly PM");
+    fd.append("job_type","maintenance");
+    fd.append("work_description","Preventive maintenance checklist completed");
+    fd.append("atm_status",form.atm_status);
+    fd.append("start_time",form.start_time);
+    fd.append("end_time",form.end_time);
+    fd.append("scheduled_date",form.service_date);
+    fd.append("completed_date",form.service_date);
+    fd.append("hours_spent",String(hours));
+    fd.append("quarter",String(Math.ceil((serviceDate.getMonth()+1)/3)));
+    fd.append("year",String(serviceDate.getFullYear()));
+    fd.append("notes",form.notes);
+    fd.append("custodian1_name",form.custodian1_name);
+    fd.append("custodian1_signature",form.custodian1_signature);
+    fd.append("custodian2_name",form.custodian2_name);
+    fd.append("custodian2_signature",form.custodian2_signature);
+    sections.forEach(section=>form.checklist[section.key].forEach((answer:string,index:number)=>{
+      fd.append(`checklist[${section.key}][${index}]`,answer);
+    }));
+    fd.append("submit_now",submitNow?"1":"0");
+    files.forEach(file=>fd.append("files[]",file));
+    router.post("/engineer/job-cards",fd,{
       forceFormData:true,
       onSuccess:()=>onSave(submitNow),
-      onError:(e)=>{ alert(Object.values(e)[0]||"Failed to save."); setSaving(false); },
+      onError:(errors)=>{alert(Object.values(errors)[0]||"Failed to save.");setSaving(false);},
       onFinish:()=>setSaving(false),
     });
   };
+  const required=attempted?" *":"";
+  const fieldLabel=(text:string,missing:boolean)=> <label style={labelStyle}>{text}{required&&missing&&<span style={{color:C.danger}}>{required}</span>}</label>;
 
-  return (
-    <div style={{paddingBottom:20}}>
-      {/* ATM select */}
-      <div style={{marginBottom:16}}>
-        <label style={labelStyle}>ATM <span style={{color:C.danger}}>*</span></label>
-        <select value={form.atm_id} onChange={e=>set("atm_id")(e.target.value)} style={{
-          ...inputStyle,appearance:"none",
-          backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238b909a' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E")`,
-          backgroundRepeat:"no-repeat",backgroundPosition:"right 14px center",paddingRight:40}}>
-          <option value="">— Select ATM —</option>
-          {atms.map((a:Atm)=>(
-            <option key={a.id} value={a.id}>{a.terminal_id} · {a.location} ({a.bank.short_code})</option>
-          ))}
-        </select>
-        {selectedAtm&&(
-          <div style={{marginTop:6,background:C.primaryLight,borderRadius:8,padding:"8px 12px",
-            fontSize:12,color:C.primary,fontWeight:600}}>
-            {selectedAtm.model} · {selectedAtm.status} · {selectedAtm.bank.name}
+  return <div className="engineer-jobcard-form" style={{paddingBottom:20,display:"grid",gap:16}}>
+    <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:16,display:"grid",gap:14}}>
+      <div>
+        {fieldLabel("ATM",!form.atm_id)}
+        <input
+          type="search"
+          list="engineer-pm-atms"
+          value={atmSearch}
+          onChange={event=>searchAtm(event.target.value)}
+          placeholder="Search by ATM ID, location, or bank…"
+          autoComplete="off"
+          style={inputStyle}
+        />
+        <datalist id="engineer-pm-atms">
+          {atms.map((atm:Atm)=><option key={atm.id} value={atmOptionLabel(atm)}/>)}
+        </datalist>
+      </div>
+      {selectedAtm&&<div style={{background:C.primaryLight,borderRadius:8,padding:12,fontSize:13,color:C.primary,fontWeight:600}}>
+        {selectedAtm.bank.name} · {selectedAtm.location} · {selectedAtm.model} · {selectedAtm.serial_number||"Serial number not recorded"}
+      </div>}
+      <div className="engineer-jobcard-date-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
+        <div>{fieldLabel("Service date",!form.service_date)}<div className="engineer-jobcard-now-field"><input type="date" value={form.service_date} onChange={event=>set("service_date")(event.target.value)} style={inputStyle}/><button type="button" className="engineer-jobcard-now" onClick={()=>set("service_date")(localDateValue())}>Now</button></div></div>
+        <div>{fieldLabel("CE start time",!form.start_time)}<input type="time" value={form.start_time} onChange={event=>set("start_time")(event.target.value)} style={inputStyle}/></div>
+        <div>{fieldLabel("CE end time",!form.end_time)}<div className="engineer-jobcard-now-field"><input type="time" value={form.end_time} onChange={event=>set("end_time")(event.target.value)} style={inputStyle}/><button type="button" className="engineer-jobcard-now" onClick={()=>set("end_time")(localTimeValue())}>Now</button></div></div>
+        <div>{fieldLabel("ATM status after visit",!form.atm_status)}<select value={form.atm_status} onChange={event=>set("atm_status")(event.target.value)} style={inputStyle}>{VISIT_STATUS.map(status=><option key={status}>{status}</option>)}</select></div>
+      </div>
+      {sections.map(section=><section key={section.key} style={{border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 14px"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,margin:"4px 0 8px"}}>
+            <h3 style={{fontSize:14,fontWeight:800,color:C.text,margin:0}}>{section.title}</h3>
+            <button type="button" onClick={()=>markSectionDone(section.key)} style={{flexShrink:0,padding:"5px 9px",border:`1px solid ${C.success}55`,borderRadius:7,background:C.successLight,color:C.success,fontSize:11,fontWeight:700,cursor:"pointer"}}>
+              ✓ All done
+            </button>
           </div>
-        )}
-      </div>
-
-      {/* Type */}
-      <div style={{marginBottom:16}}>
-        <label style={labelStyle}>Maintenance Type <span style={{color:C.danger}}>*</span></label>
-        <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-          {TYPES.map(t=>(
-            <button key={t} type="button" onClick={()=>set("type")(t)} style={{
-              padding:"8px 14px",borderRadius:20,cursor:"pointer",fontFamily:"inherit",
-              border:`1.5px solid ${form.type===t?C.primary:C.border}`,
-              background:form.type===t?C.primary:C.surface,
-              color:form.type===t?"#fff":C.textMid,fontSize:13,fontWeight:600,
-            }}>{t}</button>
-          ))}
-        </div>
-      </div>
-
-      {/* Work description */}
-      <div style={{marginBottom:16}}>
-        <label style={labelStyle}>Work Performed <span style={{color:C.danger}}>*</span></label>
-        <textarea value={form.work_description} onChange={e=>set("work_description")(e.target.value)}
-          placeholder="Describe all work performed in detail…" rows={4}
-          style={{...inputStyle,resize:"vertical"}}/>
-      </div>
-
-      {/* Parts */}
-      <div style={{marginBottom:16}}>
-        <label style={labelStyle}>Parts Used</label>
-        <textarea value={form.parts_used} onChange={e=>set("parts_used")(e.target.value)}
-          placeholder="List any parts replaced or used…" rows={2}
-          style={{...inputStyle,resize:"vertical"}}/>
-      </div>
-
-      {/* Hours + Quarter */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
-        <div>
-          <label style={labelStyle}>Hours Spent</label>
-          <input type="number" value={form.hours_spent} onChange={e=>set("hours_spent")(e.target.value)}
-            placeholder="e.g. 2.5" min="0" max="24" step="0.5" style={inputStyle}/>
-        </div>
-        <div>
-          <label style={labelStyle}>Quarter</label>
-          <div style={{display:"flex",gap:6}}>
-            {QUARTERS.map(q=>(
-              <button key={q} type="button" onClick={()=>set("quarter")(q)} style={{
-                flex:1,padding:"12px 4px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",
-                border:`1.5px solid ${form.quarter===q?C.primary:C.border}`,
-                background:form.quarter===q?C.primary:C.surface,
-                color:form.quarter===q?"#fff":C.textMid,fontSize:13,fontWeight:700,
-              }}>Q{q}</button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Dates */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
-        <div>
-          <label style={labelStyle}>Scheduled Date</label>
-          <input type="date" value={form.scheduled_date} onChange={e=>set("scheduled_date")(e.target.value)} style={inputStyle}/>
-        </div>
-        <div>
-          <label style={labelStyle}>Completed Date</label>
-          <input type="date" value={form.completed_date} onChange={e=>set("completed_date")(e.target.value)} style={inputStyle}/>
-        </div>
-      </div>
-
-      {/* Notes */}
-      <div style={{marginBottom:16}}>
-        <label style={labelStyle}>Notes</label>
-        <textarea value={form.notes} onChange={e=>set("notes")(e.target.value)}
-          placeholder="Any additional remarks…" rows={3}
-          style={{...inputStyle,resize:"vertical"}}/>
-      </div>
-
-      {/* Files */}
-      <div style={{marginBottom:24}}>
-        <label style={labelStyle}>Attachments ({files.length}/10)</label>
-        <FileUpload files={files} onChange={setFiles}/>
-      </div>
-
-      {/* Actions */}
-      <div style={{display:"flex",flexDirection:"column",gap:10}}>
-        <Btn variant="primary" onClick={()=>submit(true)} disabled={saving} full>
-          {saving?"Saving…":"✓ Submit for Review"}
-        </Btn>
-        <Btn variant="ghost" onClick={()=>submit(false)} disabled={saving} full>
-          💾 Save as Draft
-        </Btn>
-        <Btn variant="secondary" onClick={onClose} disabled={saving} full>Cancel</Btn>
-      </div>
+          {section.items.map((item,index)=><div key={item} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(130px,auto)",alignItems:"center",gap:10,padding:"9px 0",borderTop:`1px solid ${C.border}`}}>
+            <span style={{fontSize:13,color:C.textMid}}><ChecklistItemText item={item}/></span>
+            <select aria-label={`${item} status`} value={form.checklist[section.key][index]||""} onChange={event=>setChecklist(section.key,index,event.target.value)} style={{...inputStyle,padding:"9px 10px",borderColor:attempted&&!form.checklist[section.key][index]?C.danger:C.border}}>
+              <option value="">Select status…</option>{PM_ANSWERS.map(([value,label])=><option key={value} value={value}>{label}</option>)}
+            </select>
+          </div>)}
+        </section>)}
+      <div>{fieldLabel("Notes / remarks",false)}<textarea value={form.notes} onChange={event=>set("notes")(event.target.value)} placeholder="Describe any Not OK items or other observations…" rows={3} style={{...inputStyle,resize:"vertical"}}/></div>
     </div>
-  );
+    <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:16,display:"grid",gap:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12}}>
+        <div>{fieldLabel("Custodian 1 name",!form.custodian1_name.trim())}<input value={form.custodian1_name} onChange={event=>set("custodian1_name")(event.target.value)} style={inputStyle}/></div>
+        <div>{fieldLabel("Custodian 2 name (optional)",!!form.custodian2_name.trim()&&!form.custodian2_signature)}<input value={form.custodian2_name} onChange={event=>set("custodian2_name")(event.target.value)} style={inputStyle}/></div>
+      </div>
+      <SignaturePad label="Custodian 1 signature" value={form.custodian1_signature} onChange={set("custodian1_signature")}/>
+      <SignaturePad label="Custodian 2 signature (optional)" value={form.custodian2_signature} onChange={set("custodian2_signature")}/>
+    </div>
+    <div>
+      {fieldLabel("Attachments",false)}<FileUpload files={files} onChange={setFiles}/>
+    </div>
+    {attempted&&!valid&&<div role="alert" style={{background:C.dangerLight,color:C.danger,padding:12,borderRadius:8,fontSize:13}}>Complete the required fields, PM checklist items, and custodian signatures before saving.</div>}
+    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+      <Btn variant="primary" onClick={()=>submit(true)} disabled={saving} full>{saving?"Saving…":"✓ Submit for Review"}</Btn>
+      <Btn variant="ghost" onClick={()=>submit(false)} disabled={saving} full>💾 Save as Draft</Btn>
+      <Btn variant="secondary" onClick={onClose} disabled={saving} full>Cancel</Btn>
+    </div>
+  </div>;
 };
 
 // ─── Job Card Detail ──────────────────────────────────────────────────────────
 const JobCardDetail = ({card,onClose,onSubmit,onDiscard,onNewSubmission}:any) => (
-  <div style={{paddingBottom:8}}>
+  <div className="engineer-jobcard-detail" style={{paddingBottom:8}}>
     {/* Status banner */}
     <div style={{background:STATUS_BG[card.status],borderRadius:12,padding:"14px 16px",marginBottom:16}}>
       <div style={{fontSize:15,fontWeight:700,color:STATUS_COLOR[card.status]}}>
@@ -454,13 +567,15 @@ const JobCardDetail = ({card,onClose,onSubmit,onDiscard,onNewSubmission}:any) =>
     </div>
 
     {/* Info grid */}
-    <div style={{background:C.surface,borderRadius:12,padding:14,
-      display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+    <div className="engineer-jobcard-detail-info" style={{background:C.surface,borderRadius:12,padding:14,
+      display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:16}}>
       {[
         ["ATM",card.atm.terminal_id],["Bank",card.atm.bank.name],
         ["Location",card.atm.location],["Type",card.type],
         ["Quarter",`Q${card.quarter} ${card.year}`],["Hours",`${card.hours_spent}h`],
         ["Scheduled",fmt(card.scheduled_date)],["Completed",fmt(card.completed_date)],
+        ["Visit time",card.start_time&&card.end_time?`${card.start_time}–${card.end_time}`:"—"],
+        ["ATM status",card.atm_status||"—"],
       ].map(([k,v])=>(
         <div key={k}>
           <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em"}}>{k}</div>
@@ -469,24 +584,65 @@ const JobCardDetail = ({card,onClose,onSubmit,onDiscard,onNewSubmission}:any) =>
       ))}
     </div>
 
-    {/* Work */}
+    {card.job_type==="repair"&&card.fault_category&&(
+      <div style={{marginBottom:12}}>
+        <div style={{fontSize:11,fontWeight:800,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:8}}>Fault category</div>
+        <div style={{background:C.surface,borderRadius:10,padding:"12px 14px",fontSize:14,color:C.text}}>{card.fault_category}</div>
+      </div>
+    )}
+
+    {card.job_type==="maintenance"&&card.checklist&&(
+      <div style={{display:"grid",gap:10,marginBottom:12}}>
+        {PM_CHECKLIST.filter(section=>card.checklist?.[section.key]).map(section=>(
+          <div key={section.key} className="engineer-jobcard-checklist" style={{background:C.surface,borderRadius:10,padding:"12px 14px"}}>
+            <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:8}}>{section.title}</div>
+            {section.items.map((item,index)=>{
+              const answer=card.checklist?.[section.key]?.[index];
+              return <div key={item} className="engineer-jobcard-check-row" style={{display:"flex",justifyContent:"space-between",gap:10,padding:"5px 0",fontSize:12,color:C.textMid,borderTop:`1px solid ${C.border}`}}>
+              <span style={{minWidth:0,overflowWrap:"anywhere"}}><ChecklistItemText item={item}/></span><strong style={{flexShrink:0,whiteSpace:"nowrap",color:answer==="fail"?C.danger:C.primary}}>{PM_ANSWERS.find(([value])=>value===answer)?.[1]||"—"}</strong>
+              </div>;
+            })}
+          </div>
+        ))}
+      </div>
+    )}
+
     <div style={{marginBottom:12}}>
-      <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",
-        letterSpacing:"0.04em",marginBottom:8}}>Work Performed</div>
+      <div style={{fontSize:11,fontWeight:800,color:C.textMuted,textTransform:"uppercase",
+        letterSpacing:"0.04em",marginBottom:8}}>
+        {card.job_type==="maintenance"?"Notes / Remarks":"Work Performed"}
+      </div>
       <div style={{background:C.surface,borderRadius:10,padding:"12px 14px",
-        fontSize:14,color:C.text,lineHeight:1.7}}>{card.work_description}</div>
+        fontSize:14,color:C.text,lineHeight:1.7}}>
+        {card.job_type==="maintenance"?(card.notes||"No notes recorded"):card.work_description}
+      </div>
     </div>
 
     {card.parts_used&&(
       <div style={{marginBottom:12}}>
-        <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",
+        <div style={{fontSize:11,fontWeight:800,color:C.textMuted,textTransform:"uppercase",
           letterSpacing:"0.04em",marginBottom:8}}>Parts Used</div>
         <div style={{background:C.surface,borderRadius:10,padding:"12px 14px",
           fontSize:14,color:C.text}}>{card.parts_used}</div>
       </div>
     )}
 
-    {card.notes&&(
+    {(card.status!=="draft"&&card.technician_signature||card.custodian1_name||card.custodian2_name)&&(
+      <div style={{background:C.surface,borderRadius:10,padding:12,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:12}}>
+        {[
+          ["Engineer",card.status!=="draft"?card.technician_signature:null,"Engineer signature"],
+          [card.custodian1_name||"Custodian 1",card.custodian1_signature,"Custodian 1 signature"],
+          [card.custodian2_name||"Custodian 2",card.custodian2_signature,"Custodian 2 signature"],
+        ].filter(([,signature])=>signature).map(([name,signature,label])=>(
+          <div key={label} style={{fontSize:11,color:C.textMid}}>
+            <div style={{fontWeight:700,marginBottom:5}}>{name}</div>
+            <img src={signature} alt={label} style={{width:"100%",height:48,objectFit:"contain",background:C.white,borderRadius:6}}/>
+          </div>
+        ))}
+      </div>
+    )}
+
+    {card.job_type!=="maintenance"&&card.notes&&(
       <div style={{background:C.warningLight,border:"1px solid #fde68a",borderRadius:10,
         padding:"10px 14px",fontSize:13,color:"#92400e",marginBottom:12}}>
         📝 {card.notes}
@@ -495,7 +651,7 @@ const JobCardDetail = ({card,onClose,onSubmit,onDiscard,onNewSubmission}:any) =>
 
     {/* Attachments */}
     <div style={{marginBottom:16}}>
-      <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",
+      <div style={{fontSize:11,fontWeight:800,color:C.textMuted,textTransform:"uppercase",
         letterSpacing:"0.04em",marginBottom:10}}>
         Attachments ({card.attachments?.length??0})
       </div>
@@ -505,6 +661,10 @@ const JobCardDetail = ({card,onClose,onSubmit,onDiscard,onNewSubmission}:any) =>
     {/* Actions */}
     <div style={{display:"flex",flexDirection:"column",gap:10,paddingTop:12,
       borderTop:`1px solid ${C.border}`}}>
+      <a href={`/job-cards/${card.id}/print`} target="_blank" rel="noreferrer"
+        style={{display:"flex",alignItems:"center",justifyContent:"center",gap:7,width:"100%",boxSizing:"border-box",background:C.surface,color:C.text,border:`1px solid ${C.border}`,borderRadius:12,padding:"12px 20px",fontFamily:"inherit",fontWeight:700,fontSize:15,textAlign:"center",textDecoration:"none"}}>
+        ↓ Print / Save PDF for Custodian
+      </a>
       {card.status==="draft"&&(
         <>
           <Btn variant="primary"    onClick={onSubmit}  full>✓ Submit for Review</Btn>
@@ -521,8 +681,20 @@ const JobCardDetail = ({card,onClose,onSubmit,onDiscard,onNewSubmission}:any) =>
 
 // ─── Tab: Home (Dashboard) ────────────────────────────────────────────────────
 const HomeTab = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear}:any) => {
-  const pmDone   = pmRecords.filter((p:PMRecord)=>p.status==="Completed").length;
-  const pmTotal  = pmRecords.length;
+  const approvedPmCards=jobCards.filter((jobCard:JobCard)=>(jobCard.job_type==="maintenance"||jobCard.type==="Quarterly PM")
+      &&jobCard.status==="approved"
+      &&jobCard.quarter===currentQuarter
+      &&jobCard.year===currentYear);
+  const scheduledPmAtms=new Set<number>(pmRecords.map((record:PMRecord)=>record.atm_id));
+  const completedPmAtms=new Set<number>(
+    pmRecords.filter((record:PMRecord)=>record.status==="Completed").map((record:PMRecord)=>record.atm_id)
+  );
+  approvedPmCards.forEach((jobCard:JobCard)=>{
+    completedPmAtms.add(jobCard.atm.id);
+    scheduledPmAtms.add(jobCard.atm.id);
+  });
+  const pmDone=completedPmAtms.size;
+  const pmTotal=scheduledPmAtms.size;
   const pct      = pmTotal>0?Math.round((pmDone/pmTotal)*100):0;
   const pending  = jobCards.filter((c:JobCard)=>c.status==="submitted").length;
   const rejected = jobCards.filter((c:JobCard)=>c.status==="rejected").length;
@@ -682,7 +854,7 @@ const PMTab = ({pmRecords,currentQuarter,currentYear,onLogJobCard}:any) => {
                             background:C.primary,color:"#fff",border:"none",borderRadius:8,
                             padding:"7px 12px",fontSize:12,fontWeight:700,cursor:"pointer",
                             fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                            + Log Card
+                            + Log PM
                           </button>
                         )
                     }
@@ -698,10 +870,10 @@ const PMTab = ({pmRecords,currentQuarter,currentYear,onLogJobCard}:any) => {
 };
 
 // ─── Tab: Log Job Card ────────────────────────────────────────────────────────
-const LogTab = ({atms,onSave}:any) => (
+const LogTab = ({atms,onSave,initialAtmId}:any) => (
   <div style={{padding:"16px 16px 24px"}}>
-    <h2 style={{margin:"0 0 16px",fontSize:18,fontWeight:800,color:C.text}}>Log Job Card</h2>
-    <JobCardForm atms={atms} onSave={onSave} onClose={()=>{}}/>
+    <h2 style={{margin:"0 0 16px",fontSize:18,fontWeight:800,color:C.text}}>Preventive Maintenance Job Card</h2>
+    <JobCardForm atms={atms} onSave={onSave} onClose={()=>{}} initialAtmId={initialAtmId}/>
   </div>
 );
 
@@ -712,13 +884,13 @@ const CardsTab = ({jobCards,onView}:any) => {
 
   return (
     <div style={{padding:"16px 16px 24px"}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+      <div className="engineer-jobcards-heading" style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
         <h2 style={{margin:0,fontSize:18,fontWeight:800,color:C.text}}>My Job Cards</h2>
         <span style={{fontSize:13,color:C.textMuted}}>{jobCards.length} total</span>
       </div>
 
       {/* Filter chips */}
-      <div style={{display:"flex",gap:8,marginBottom:16,overflowX:"auto",paddingBottom:4}}>
+      <div className="engineer-jobcards-filters" style={{display:"flex",gap:8,marginBottom:16,overflowX:"auto",paddingBottom:4}}>
         {(["all","draft","submitted","approved","rejected"] as const).map(f=>{
           const count = f==="all"?jobCards.length:jobCards.filter((c:JobCard)=>c.status===f).length;
           const active= filter===f;
@@ -740,41 +912,41 @@ const CardsTab = ({jobCards,onView}:any) => {
           <div style={{fontSize:14}}>No {filter==="all"?"":filter+" "}job cards</div>
         </div>
       ):(
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {filtered.map((card:JobCard)=>(
-            <div key={card.id} onClick={()=>onView(card)}
+        <div className="engineer-jobcards-list" style={{display:"flex",flexDirection:"column",gap:10}}>
+          {filtered.map((jobCard:JobCard)=>(
+            <div key={jobCard.id} onClick={()=>onView(jobCard)}
+              className="engineer-jobcard-list-card"
               style={{...card,padding:14,cursor:"pointer",
-                borderLeft:`4px solid ${STATUS_COLOR[card.status]??C.border}`}}>
-              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8}}>
+                borderLeft:`4px solid ${STATUS_COLOR[jobCard.status]??C.border}`}}>
+              <div className="engineer-jobcard-list-header" style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8}}>
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontWeight:800,fontSize:15,color:C.text,fontFamily:"monospace"}}>
-                    {card.atm.terminal_id}
+                  <div className="engineer-jobcard-terminal" style={{fontWeight:800,fontSize:15,color:C.text,fontFamily:"monospace"}}>
+                    {jobCard.atm.terminal_id}
                   </div>
-                  <div style={{fontSize:12,color:C.textMuted,marginTop:2}}>
-                    {card.atm.location} · {card.atm.bank.short_code}
+                  <div className="engineer-jobcard-site" style={{fontSize:12,color:C.textMuted,marginTop:2}}>
+                    {jobCard.atm.location} · {jobCard.atm.bank.short_code}
                   </div>
-                  <div style={{fontSize:13,fontWeight:600,color:C.text,marginTop:4}}>{card.type}</div>
+                  <div className="engineer-jobcard-type" style={{fontSize:13,fontWeight:600,color:C.text,marginTop:4}}>{jobCard.type}</div>
                 </div>
-                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
-                  <Pill status={card.status}/>
-                  {card.attachments?.length>0&&(
+                <div className="engineer-jobcard-list-status" style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
+                  <Pill status={jobCard.status}/>
+                  {jobCard.attachments?.length>0&&(
                     <span style={{fontSize:11,color:C.primary,fontWeight:700}}>
-                      📎 {card.attachments.length}
+                      📎 {jobCard.attachments.length}
                     </span>
                   )}
                 </div>
               </div>
-              {card.status==="rejected"&&card.rejection_reason&&(
+              {jobCard.status==="rejected"&&jobCard.rejection_reason&&(
                 <div style={{marginTop:8,background:C.dangerLight,borderRadius:8,
                   padding:"8px 10px",fontSize:12,color:C.danger}}>
-                  ✕ {card.rejection_reason}
+                  ✕ {jobCard.rejection_reason}
                 </div>
               )}
-              <div style={{display:"flex",justifyContent:"space-between",marginTop:10,
-                paddingTop:8,borderTop:`1px solid ${C.surface}`}}>
-                <span style={{fontSize:12,color:C.textMuted}}>Q{card.quarter} {card.year}</span>
-                <span style={{fontSize:12,color:C.textMuted}}>{fmt(card.scheduled_date)}</span>
-                <span style={{fontSize:12,color:C.textMuted}}>{card.hours_spent}h</span>
+              <div className="engineer-jobcard-list-meta" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))",gap:8,marginTop:10,paddingTop:8,borderTop:`1px solid ${C.surface}`}}>
+                <span><small>Quarter</small>Q{jobCard.quarter} {jobCard.year}</span>
+                <span><small>Service date</small>{fmt(jobCard.scheduled_date)}</span>
+                <span><small>Time on site</small>{jobCard.hours_spent}h</span>
               </div>
             </div>
           ))}
@@ -785,9 +957,19 @@ const CardsTab = ({jobCards,onView}:any) => {
 };
 
 // ─── Tab: Profile ─────────────────────────────────────────────────────────────
-const ProfileTab = ({engineer, onPassClick}:any) => {
+const ProfileTab = ({engineer, onPassClick, addToast}:any) => {
+  const [signature,setSignature]=useState(engineer.signature||"");
+  const [savingSignature,setSavingSignature]=useState(false);
   const handleLogout = () => {
     if (confirm("Sign out?")) router.post("/logout");
+  };
+  const saveSignature=()=>{
+    setSavingSignature(true);
+    router.put("/engineer/signature",{signature},{
+      onSuccess:()=>addToast("Engineer signature saved.","success"),
+      onError:errors=>addToast(errors.signature||"Could not save engineer signature.","error"),
+      onFinish:()=>setSavingSignature(false),
+    });
   };
   return (
     <div style={{padding:"16px 16px 24px"}}>
@@ -823,6 +1005,17 @@ const ProfileTab = ({engineer, onPassClick}:any) => {
         ))}
       </div>
 
+      <div style={{...card,padding:16,marginBottom:16}}>
+        <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:4}}>Engineer Signature</div>
+        <p style={{fontSize:12,color:C.textMuted,margin:"0 0 12px"}}>
+          Save your signature once. It will be added to submitted job cards and shown in their printed PDFs.
+        </p>
+        <SignaturePad label="Draw your saved signature" value={signature} onChange={setSignature}/>
+        <Btn variant="primary" onClick={saveSignature} disabled={savingSignature} full>
+          {savingSignature?"Saving…":"Save Signature"}
+        </Btn>
+      </div>
+
       <button onClick={onPassClick} style={{
         width:"100%",padding:"14px",borderRadius:14,border:`1px solid ${C.border}`,
         background:C.white,color:C.textMid,fontWeight:700,fontSize:15,
@@ -843,7 +1036,7 @@ const ProfileTab = ({engineer, onPassClick}:any) => {
 const TABS = [
   {id:"home",    icon:"◈",  label:"Home"    },
   {id:"pm",      icon:"📋", label:"PM"      },
-  {id:"log",     icon:"✏️", label:"Log Card"},
+  {id:"log",     icon:"✏️", label:"Log PM"},
   {id:"cards",   icon:"🗂", label:"Job Cards"},
   {id:"calls",   icon:"📞", label:"Calls"   },
 ];
@@ -884,14 +1077,17 @@ function getCSRFCookie() {
 }
 
 // ─── Close Call Form ──────────────────────────────────────────────────────────
-const CloseCallForm = ({call, atms, onClose, onSaved}:any) => {
+const CloseCallForm = ({call, onClose, onSaved}:any) => {
   // Default closed_at to current local datetime
   const nowLocal = new Date();
-  const localIso = new Date(nowLocal.getTime() - nowLocal.getTimezoneOffset()*60000)
-    .toISOString().slice(0,16);
+  const localIso = localDateTimeValue(nowLocal);
+  const startedAt = new Date(call.assigned_at || call.created_at || nowLocal);
 
   const [form,setForm] = useState({
-    resolution_notes:"", work_description:"", parts_used:"",
+    fault_category:"", work_description:"", parts_used:"",
+    atm_status:"In Service", start_time:startedAt.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}),
+    custodian1_name:"", custodian1_signature:"",
+    custodian2_name:"", custodian2_signature:"", phone_support:false,
     closed_at: localIso, notes:"",
   });
   const [files,setFiles2]  = useState<File[]>([]);
@@ -899,11 +1095,22 @@ const CloseCallForm = ({call, atms, onClose, onSaved}:any) => {
   const set = (k:string)=>(v:any)=>setForm(f=>({...f,[k]:v}));
 
   const submit = async (submitNow:boolean) => {
-    if (!form.resolution_notes.trim()) { alert("Please enter resolution notes."); return; }
-    if (!form.work_description.trim()) { alert("Please describe the work performed."); return; }
+    if (!form.fault_category) { alert("Please select the fault category."); return; }
+    if (form.work_description.trim().length<10) { alert("Please describe the work performed and resolution (at least 10 characters)."); return; }
+    if (!form.start_time) { alert("Please enter the engineer arrival time."); return; }
+    if (!form.phone_support && !form.custodian1_name.trim()) { alert("Please enter the custodian's name."); return; }
+    if (!form.phone_support && !form.custodian1_signature) { alert("Please capture the custodian's signature."); return; }
+    if (!!form.custodian2_name.trim() !== !!form.custodian2_signature) { alert("Enter both the second custodian's name and signature, or leave both blank."); return; }
+    const closedAt = new Date(form.closed_at);
+    if (Number.isNaN(closedAt.getTime())) { alert("Please enter a valid call closing date and time."); return; }
     setSaving(true);
     const fd = new FormData();
-    Object.entries(form).forEach(([k,v])=>fd.append(k,String(v)));
+    Object.entries(form).forEach(([k,v])=>{
+      if(k==="closed_at") return;
+      if(k!=="phone_support") fd.append(k,String(v));
+    });
+    fd.append("closed_at",closedAt.toISOString());
+    fd.append("phone_support",form.phone_support?"1":"0");
     fd.append("submit_now", submitNow?"1":"0");
     files.forEach(f=>fd.append("files[]",f));
     try {
@@ -913,7 +1120,13 @@ const CloseCallForm = ({call, atms, onClose, onSaved}:any) => {
         credentials:"same-origin",
         body:fd,
       });
-      if (!res.ok) { const e=await res.json(); alert(e.message||"Failed to close call."); setSaving(false); return; }
+      if (!res.ok) {
+        const e=await res.json();
+        const message=e.message||Object.values(e.errors||{})[0]?.[0]||"Failed to close call.";
+        alert(message);
+        setSaving(false);
+        return;
+      }
       onSaved();
     } catch { alert("Network error."); setSaving(false); }
   };
@@ -927,26 +1140,27 @@ const CloseCallForm = ({call, atms, onClose, onSaved}:any) => {
           {call.atm.terminal_id} · {call.atm.bank.short_code}
         </div>
         <div style={{fontSize:13,color:C.textMid,marginTop:3}}>{call.fault_description}</div>
-      </div>
-
-      {/* Resolution notes */}
-      <div style={{marginBottom:14}}>
-        <label style={{...labelStyle}}>Resolution Notes <span style={{color:C.danger}}>*</span></label>
-        <textarea value={form.resolution_notes} onChange={e=>set("resolution_notes")(e.target.value)}
-          placeholder="Describe how the fault was resolved…" rows={3}
-          style={{...inputStyle,resize:"vertical"}}/>
+        <div style={{fontSize:12,color:C.textMuted,marginTop:4}}>{call.atm.location} · {call.atm.model}</div>
       </div>
 
       <div style={{fontSize:13,fontWeight:700,color:C.text,margin:"16px 0 12px",
         paddingTop:12,borderTop:`1px solid ${C.border}`}}>
-        Job Card Details
+        ATM Repair Job Card
+      </div>
+
+      <div style={{marginBottom:14}}>
+        <label style={labelStyle}>Fault Category <span style={{color:C.danger}}>*</span></label>
+        <select value={form.fault_category} onChange={e=>set("fault_category")(e.target.value)} style={inputStyle}>
+          <option value="">Select fault category…</option>
+          {["Card Reader","Cash Dispenser","GBNA","Receipt Printer","Network / Communication","Power / UPS","Software / Configuration","PIN Pad","Other"].map(category=><option key={category}>{category}</option>)}
+        </select>
       </div>
 
       {/* Work description */}
       <div style={{marginBottom:14}}>
-        <label style={{...labelStyle}}>Work Performed <span style={{color:C.danger}}>*</span></label>
+        <label style={{...labelStyle}}>Work Performed / Resolution <span style={{color:C.danger}}>*</span></label>
         <textarea value={form.work_description} onChange={e=>set("work_description")(e.target.value)}
-          placeholder="Describe all work carried out…" rows={3}
+          placeholder="Describe the work carried out and how the fault was resolved…" rows={4}
           style={{...inputStyle,resize:"vertical"}}/>
       </div>
 
@@ -958,11 +1172,27 @@ const CloseCallForm = ({call, atms, onClose, onSaved}:any) => {
           style={{...inputStyle,resize:"vertical"}}/>
       </div>
 
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+        <div>
+          <label style={labelStyle}>Status After Repair <span style={{color:C.danger}}>*</span></label>
+          <select value={form.atm_status} onChange={e=>set("atm_status")(e.target.value)} style={inputStyle}>
+            {VISIT_STATUS.map(status=><option key={status}>{status}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={labelStyle}>CE Start Time <span style={{color:C.danger}}>*</span></label>
+          <input type="time" value={form.start_time} onChange={e=>set("start_time")(e.target.value)} style={inputStyle}/>
+        </div>
+      </div>
+
       {/* Closed at — custom datetime */}
       <div style={{marginBottom:14}}>
-        <label style={{...labelStyle}}>Date & Time Closed <span style={{color:C.danger}}>*</span></label>
-        <input type="datetime-local" value={form.closed_at}
-          onChange={e=>set("closed_at")(e.target.value)} style={inputStyle}/>
+        <label style={{...labelStyle}}>CE End Date & Time <span style={{color:C.danger}}>*</span></label>
+        <div className="engineer-jobcard-now-field">
+          <input type="datetime-local" value={form.closed_at}
+            onChange={e=>set("closed_at")(e.target.value)} style={inputStyle}/>
+          <button type="button" className="engineer-jobcard-now" onClick={()=>set("closed_at")(localDateTimeValue())}>Now</button>
+        </div>
         {call.sla_breach_at&&(()=>{
           const sla = slaInfo(call);
           return sla?(
@@ -972,6 +1202,30 @@ const CloseCallForm = ({call, atms, onClose, onSaved}:any) => {
             </div>
           ):null;
         })()}
+      </div>
+
+      <div style={{margin:"4px 0 14px",padding:12,border:`1px solid ${C.border}`,borderRadius:10}}>
+        <label style={{display:"flex",alignItems:"flex-start",gap:10,fontSize:13,fontWeight:700,color:C.text}}>
+          <input type="checkbox" checked={form.phone_support} onChange={e=>set("phone_support")(e.target.checked)} style={{marginTop:2}}/>
+          Resolved via phone support (no custodian signature required)
+        </label>
+      </div>
+
+      <div style={{display:"grid",gap:14,marginBottom:14}}>
+        {!form.phone_support&&<>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div>
+              <label style={labelStyle}>Custodian 1 name <span style={{color:C.danger}}>*</span></label>
+              <input value={form.custodian1_name} onChange={e=>set("custodian1_name")(e.target.value)} style={inputStyle}/>
+            </div>
+            <div>
+              <label style={labelStyle}>Custodian 2 name (optional)</label>
+              <input value={form.custodian2_name} onChange={e=>set("custodian2_name")(e.target.value)} style={inputStyle}/>
+            </div>
+          </div>
+          <SignaturePad label="Custodian 1 signature *" value={form.custodian1_signature} onChange={set("custodian1_signature")}/>
+          <SignaturePad label="Custodian 2 signature (optional)" value={form.custodian2_signature} onChange={set("custodian2_signature")}/>
+        </>}
       </div>
 
       {/* Notes */}
@@ -1051,7 +1305,7 @@ const NoteEditor = ({call, onSave}:{call:any; onSave:(id:number,note:string)=>vo
   );
 };
 
-const CallsTab = ({atms, engineer, addToast}:any) => {
+const CallsTab = ({atms, engineer, addToast, onCallAssignmentHandled}:any) => {
   const [calls,setCalls]   = useState<any[]>([]);
   const [loading,setLoading] = useState(true);
   const [filter,setFilter] = useState("open");
@@ -1102,20 +1356,22 @@ const CallsTab = ({atms, engineer, addToast}:any) => {
       headers:{Accept:"application/json","X-Requested-With":"XMLHttpRequest","X-XSRF-TOKEN":getCSRFCookie()},
       credentials:"same-origin",
     });
-    if (res.ok) { addToast("Call assigned to you.","success"); load(); }
+    if (res.ok) {
+      onCallAssignmentHandled(call.id);
+      addToast("Call assigned to you.","success");
+      load();
+    }
     else { const e=await res.json(); addToast(e.message||"Failed.","error"); }
   };
 
   const isClosed = (s:string) => s==="resolved" || s==="escalated";
-  const filtered = filter==="open"
-    ? calls.filter(c=>!isClosed(c.status))
-    : filter==="mine"
+  const filtered = filter==="mine"
     ? calls.filter(c=>c.is_mine&&!isClosed(c.status))
-    : calls.filter(c=>isClosed(c.status));
+    : calls.filter(c=>!isClosed(c.status));
 
   const [bannerDismissed,setBannerDismissed] = useState(false);
   const mineCount = calls.filter(c=>c.is_mine&&!isClosed(c.status)).length;
-  const openCount = calls.filter(c=>c.status!=="resolved").length;
+  const openCount = calls.filter(c=>!isClosed(c.status)).length;
 
   return (
     <div style={{padding:"16px 16px 24px"}}>
@@ -1155,7 +1411,6 @@ const CallsTab = ({atms, engineer, addToast}:any) => {
         {[
           {id:"open",     label:`All Open (${openCount})`},
           {id:"mine",     label:`Mine (${mineCount})`},
-          {id:"resolved", label:"Resolved"},
         ].map((f:any)=>(
           <button key={f.id} onClick={()=>setFilter(f.id)} style={{
             padding:"7px 16px",borderRadius:20,border:filter===f.id?"none":`1px solid ${C.border}`,
@@ -1173,7 +1428,7 @@ const CallsTab = ({atms, engineer, addToast}:any) => {
       ) : filtered.length===0 ? (
         <div style={{textAlign:"center",padding:"48px 16px",color:C.textMuted}}>
           <div style={{fontSize:36,marginBottom:10}}>📭</div>
-          <div style={{fontSize:14}}>No {filter==="resolved"?"resolved":"open"} calls</div>
+          <div style={{fontSize:14}}>No open calls</div>
         </div>
       ) : (
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -1317,7 +1572,7 @@ const CallsTab = ({atms, engineer, addToast}:any) => {
           subtitle="Enter resolution details and submit a job card"
           onClose={()=>setModal(null)}>
           <CloseCallForm
-            call={selected} atms={atms}
+            call={selected}
             onClose={()=>setModal(null)}
             onSaved={()=>{
               setModal(null);
@@ -1401,12 +1656,71 @@ const Dashboard = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear,
   const [passModalOpen,setPassModalOpen] = useState(false);
   const [detailCard,setDetail]     = useState<JobCard|null>(null);
   const [toasts,setToasts]     = useState<any[]>([]);
+  const [assignedCallCount,setAssignedCallCount] = useState(0);
+  const seenAssignedCallsRef = useRef<Set<number>|null>(null);
+  const handledCallAssignmentsRef = useRef(new Set<number>());
   const [logAtmId,setLogAtmId] = useState<number|null>(null);
   const [logType,setLogType]   = useState("Quarterly PM");
 
   const addToast = useCallback((message:string,type:string="success")=>{
     setToasts(t=>[...t,{id:Date.now(),message,type}]);
   },[]);
+
+  const markCallAssignmentHandled = useCallback((callId:number)=>{
+    handledCallAssignmentsRef.current.add(callId);
+  },[]);
+
+  useEffect(()=>{
+    let checking = false;
+    const checkAssignedCalls = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const response = await fetch("/engineer/calls",{
+          headers:{Accept:"application/json","X-Requested-With":"XMLHttpRequest"},
+          credentials:"same-origin",
+          cache:"no-store",
+        });
+        if (!response.ok) throw new Error(`Call check failed (${response.status})`);
+        const data = await response.json();
+        if (!Array.isArray(data)) throw new Error("Call check returned an unexpected response");
+
+        const assignedCalls = data.filter(call =>
+          call.is_mine && call.status !== "resolved" && call.status !== "escalated"
+        );
+        const currentIds = new Set<number>(assignedCalls.map(call=>call.id));
+        const previousIds = seenAssignedCallsRef.current;
+        if (previousIds) {
+          assignedCalls
+            .filter(call=>!previousIds.has(call.id)&&!handledCallAssignmentsRef.current.has(call.id))
+            .forEach(call=>addToast(
+              `New call assigned: ${call.atm?.terminal_id ?? "ATM"} (${call.priority} priority).`,
+              "info",
+            ));
+        }
+        assignedCalls.forEach(call=>handledCallAssignmentsRef.current.delete(call.id));
+        seenAssignedCallsRef.current = currentIds;
+        setAssignedCallCount(currentIds.size);
+      } catch (error) {
+        console.error("Unable to check for newly assigned calls.",error);
+      } finally {
+        checking = false;
+      }
+    };
+
+    const checkWhenVisible = () => {
+      if (document.visibilityState === "visible") void checkAssignedCalls();
+    };
+    void checkAssignedCalls();
+    const interval = window.setInterval(checkWhenVisible,30_000);
+    window.addEventListener("focus",checkWhenVisible);
+    document.addEventListener("visibilitychange",checkWhenVisible);
+    return ()=>{
+      window.clearInterval(interval);
+      window.removeEventListener("focus",checkWhenVisible);
+      document.removeEventListener("visibilitychange",checkWhenVisible);
+    };
+  },[addToast]);
 
   useEffect(()=>{
     if (flash?.success) addToast(flash.success,"success");
@@ -1461,6 +1775,13 @@ const Dashboard = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear,
           }}>
             <span style={{fontSize:vertical?18:14}}>{t.icon}</span>
             <span>{t.label}</span>
+            {t.id==="calls"&&assignedCallCount>0&&(
+              <span style={{minWidth:18,height:18,padding:"0 5px",borderRadius:9,
+                display:"inline-flex",alignItems:"center",justifyContent:"center",
+                background:C.danger,color:"#fff",fontSize:10,fontWeight:800}}>
+                {assignedCallCount>99?"99+":assignedCallCount}
+              </span>
+            )}
           </button>
         );
       })}
@@ -1693,10 +2014,10 @@ const Dashboard = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear,
         <div style={{paddingBottom:isMobile?96:0}}>
           {tab==="home"    && <HomeTab    engineer={engineer} atms={atms} jobCards={jobCards} pmRecords={pmRecords} currentQuarter={currentQuarter} currentYear={currentYear}/>}
           {tab==="pm"      && <PMTab      pmRecords={pmRecords} currentQuarter={currentQuarter} currentYear={currentYear} onLogJobCard={openLog}/>}
-          {tab==="log"     && <LogTab     atms={atms} onSave={(submitted:boolean)=>{ addToast(submitted?"Submitted for review!":"Saved as draft.","success"); router.reload(); setTab("cards"); }}/>}
+          {tab==="log"     && <LogTab     atms={atms} initialAtmId={logAtmId} onSave={(submitted:boolean)=>{ addToast(submitted?"Submitted for review!":"Saved as draft.","success"); router.reload(); setTab("cards"); }}/>}
           {tab==="cards"   && <CardsTab   jobCards={jobCards} onView={(c:JobCard)=>{setDetail(c);setModal("detail");}}/>}
-          {tab==="profile" && <ProfileTab engineer={engineer} onPassClick={()=>setPassModalOpen(true)}/>}
-          {tab==="calls"   && <CallsTab atms={atms} engineer={engineer} addToast={addToast}/>}
+          {tab==="profile" && <ProfileTab engineer={engineer} addToast={addToast} onPassClick={()=>setPassModalOpen(true)}/>}
+          {tab==="calls"   && <CallsTab atms={atms} engineer={engineer} addToast={addToast} onCallAssignmentHandled={markCallAssignmentHandled}/>}
         </div>
 
         {/* ── FLOATING MOBILE BOTTOM NAV ── */}
@@ -1729,6 +2050,14 @@ const Dashboard = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear,
                   minWidth: active ? 72 : 48,
                   position:"relative",
                 }}>
+                  {t.id==="calls"&&assignedCallCount>0&&(
+                    <span style={{position:"absolute",top:1,right:2,minWidth:16,height:16,
+                      padding:"0 4px",borderRadius:8,display:"inline-flex",
+                      alignItems:"center",justifyContent:"center",background:C.danger,
+                      color:"#fff",fontSize:9,fontWeight:800,lineHeight:1}}>
+                      {assignedCallCount>99?"99+":assignedCallCount}
+                    </span>
+                  )}
                   <span style={{
                     fontSize:19, lineHeight:1,
                     filter: active ? "brightness(10)" : "none",

@@ -156,7 +156,7 @@ class TechmastersSeeder extends Seeder
         $engineers = DB::table('engineers')->pluck('id', 'name');
 
         // ── ATMs ──────────────────────────────────────────────────────────────
-        DB::table('atms')->insert([
+        $atmRecords = [
             [
                 'terminal_id'   => 'ATM-ABS-40',
                 'serial_number' => null,
@@ -4735,7 +4735,17 @@ class TechmastersSeeder extends Seeder
                 'created_at'    => $now,
                 'updated_at'    => $now,
             ],
-        ]);
+        ];
+        $atmRecords = array_map(function (array $atm): array {
+            $model = strtolower($atm['model']);
+            $location = strtolower($atm['location']);
+            $atm['has_gbna'] = str_contains($location, 'adt')
+                || str_contains($model, '6684')
+                || str_contains($model, 'selfserv 84');
+
+            return $atm;
+        }, $atmRecords);
+        DB::table('atms')->insert($atmRecords);
 
         $atms = DB::table('atms')->pluck('id', 'terminal_id');
 

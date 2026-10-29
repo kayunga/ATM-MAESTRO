@@ -1,0 +1,275 @@
+.calls-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0;
+  font-family: inherit;
+}
+
+.calls-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.calls-page-header h2 {
+  margin: 0;
+  color: #1a1d23;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.calls-page-header p {
+  margin: 4px 0 0;
+  color: #8b909a;
+  font-size: 13px;
+}
+
+.calls-page-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.calls-control {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid #e8eaed !important;
+  border-radius: 8px !important;
+  padding: 8px 11px !important;
+  color: #1a1d23 !important;
+  background-color: #fff !important;
+  font-family: inherit !important;
+  font-size: 13px !important;
+  line-height: 1.35;
+}
+
+.calls-control:focus {
+  border-color: #1d6ef5 !important;
+  box-shadow: 0 0 0 3px #eef3fe !important;
+  outline: none;
+}
+
+.calls-priority-filter { min-width: 145px; }
+
+.calls-action-button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 13px !important;
+  border-radius: 8px !important;
+  font-family: inherit !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.calls-action-button--secondary {
+  border: 1px solid #e8eaed !important;
+  color: #4b5260 !important;
+  background: #fff !important;
+}
+
+.calls-action-button--primary {
+  border: 1px solid #1d6ef5 !important;
+  color: #fff !important;
+  background: #1d6ef5 !important;
+}
+
+.calls-action-button:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+.calls-status-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 0;
+}
+
+.calls-status-tab {
+  min-height: 34px;
+  padding: 7px 12px !important;
+  border: 1px solid #e8eaed !important;
+  border-radius: 8px !important;
+  color: #4b5260 !important;
+  background: #fff !important;
+  font-family: inherit !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s, border-color .15s, color .15s;
+}
+
+.calls-status-tab.is-active {
+  border-color: #1d6ef5 !important;
+  color: #fff !important;
+  background: #1d6ef5 !important;
+}
+
+.calls-option-button {
+  min-height: 38px;
+  border-radius: 8px !important;
+  font-family: inherit !important;
+  font-size: 13px !important;
+  cursor: pointer;
+}
+
+.calls-report-periods .calls-option-button {
+  min-width: 100px;
+}
+
+.calls-analytics {
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.calls-analytics-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.calls-analytics-summary {
+  color: #8b909a;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.calls-analytics-controls {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 660px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.calls-period-toggle {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid #e8eaed;
+  border-radius: 9px;
+  background: #f8f9fb;
+}
+
+.calls-period-button {
+  min-height: 34px;
+  padding: 6px 10px !important;
+  border-radius: 7px !important;
+  font-family: inherit !important;
+  font-size: 12px !important;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.calls-period-button.is-active {
+  background: #1d6ef5 !important;
+  color: #fff !important;
+}
+
+.calls-custom-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: 8px;
+  min-width: min(100%, 270px);
+}
+
+.calls-date-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  color: #4b5260;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.calls-date-field .calls-control {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px !important;
+}
+
+.calls-bank-filter {
+  min-width: 130px;
+  max-width: 220px;
+}
+
+@media (max-width: 760px) {
+  .calls-page-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .calls-page-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .calls-analytics-toolbar,
+  .calls-analytics-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .calls-analytics-controls {
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+
+  .calls-period-toggle {
+    width: 100%;
+  }
+
+  .calls-period-button {
+    flex: 1 1 auto;
+  }
+
+  .calls-custom-range {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .calls-bank-filter {
+    width: 100%;
+    max-width: none;
+  }
+
+  .calls-analytics-controls > .calls-action-button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 540px) {
+  .calls-page-actions > * {
+    flex: 1 1 auto;
+  }
+
+  .calls-page-actions .calls-priority-filter {
+    flex-basis: 100%;
+  }
+
+  .calls-report-periods .calls-option-button {
+    flex: 1 1 calc(50% - 8px);
+  }
+}

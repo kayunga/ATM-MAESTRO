@@ -29,6 +29,26 @@ class CallController extends Controller
             ->whereDate('created_at', '<', now()->toDateString())
             ->update(['call_type' => 'old']);
 
+        if ($request->boolean('summary')) {
+            $slaBreached = Call::query()
+                ->whereNotNull('sla_breach_at')
+                ->where(function ($query) {
+                    $query->where(function ($openCalls) {
+                        $openCalls->where('status', '!=', 'resolved')
+                            ->where('sla_breach_at', '<', now());
+                    })->orWhere(function ($resolvedCalls) {
+                        $resolvedCalls->where('status', 'resolved')
+                            ->whereRaw('COALESCE(resolved_at, closed_at) > sla_breach_at');
+                    });
+                })
+                ->count();
+
+            return response()->json([
+                'pending' => Call::query()->where('status', 'pending')->count(),
+                'sla_breached' => $slaBreached,
+            ]);
+        }
+
         $dateFrom  = $request->query('date_from');
         $dateTo    = $request->query('date_to');
         $type      = $request->query('call_type', 'all');
@@ -129,7 +149,13 @@ class CallController extends Controller
 
         if (isset($data['status'])) {
             if ($data['status'] === 'escalated' && !$call->escalated_at) $data['escalated_at'] = now();
-            if ($data['status'] === 'resolved'  && !$call->resolved_at)  $data['resolved_at']  = now();
+            if ($data['status'] === 'resolved') {
+                if ($call->status !== 'resolved' || !$call->resolved_at) {
+                    $data['resolved_at'] = now();
+                }
+                $resolvedAt = $data['resolved_at'] ?? $call->resolved_at;
+                $data['sla_breached'] = $call->sla_breach_at && $resolvedAt->gt($call->sla_breach_at);
+            }
         }
 
         $call->update($data);
@@ -149,11 +175,15 @@ class CallController extends Controller
         $now         = now();
 
         // SLA status for frontend
-        if ($call->status === 'resolved' && $call->closed_at && $slaBreachAt) {
-            $slaStatus = $call->closed_at->lte($slaBreachAt) ? 'met' : 'breached';
+        if ($call->status === 'resolved' && $slaBreachAt) {
+            $resolvedAt = $call->resolved_at ?? $call->closed_at;
+            $slaBreached = $resolvedAt ? $resolvedAt->gt($slaBreachAt) : false;
+            $slaStatus = $slaBreached ? 'breached' : 'met';
         } elseif ($slaBreachAt) {
-            $slaStatus = $now->gt($slaBreachAt) ? 'breached' : 'active';
+            $slaBreached = $now->gt($slaBreachAt);
+            $slaStatus = $slaBreached ? 'breached' : 'active';
         } else {
+            $slaBreached = false;
             $slaStatus = 'none';
         }
 
@@ -175,7 +205,7 @@ class CallController extends Controller
             'escalated_at'      => $call->escalated_at?->toISOString(),
             'closed_at'         => $call->closed_at?->toISOString(),
             'sla_breach_at'     => $slaBreachAt?->toISOString(),
-            'sla_breached'      => $call->sla_breached,
+            'sla_breached'      => $slaBreached,
             'sla_status'        => $slaStatus,   // 'active' | 'breached' | 'met' | 'none'
             'sla_minutes'       => $slaMinutes,  // negative = past breach
             'sla_hours_allowed' => self::SLA_HOURS[$call->priority] ?? 3,

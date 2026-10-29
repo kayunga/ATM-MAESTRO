@@ -1,6 +1,8 @@
 // @ts-nocheck
 /* eslint-disable */
 import { useState } from "react";
+import { addCompanyLogo } from "./helpers";
+import "./calls-ui.css";
 
 // ─── Colours (mirror CallsModule C object) ────────────────────────────────────
 const C = {
@@ -36,7 +38,7 @@ async function loadJsPDF() {
 async function exportAnalyticsPDF(
   scoped: any[],
   allCalls: any[],
-  period: "month" | "year",
+  period: "month" | "year" | "custom",
   periodLabel: string,
   bankFilterLabel: string,
   months: { label: string; total: number; resolved: number; breached: number }[],
@@ -57,6 +59,7 @@ async function exportAnalyticsPDF(
     const doc = new JsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
     const W = 297;
     const now = new Date().toLocaleString("en-GB");
+    await addCompanyLogo(doc);
 
     // ── Drawing helpers ───────────────────────────────────────────────────────
 
@@ -175,13 +178,11 @@ async function exportAnalyticsPDF(
     };
 
     // ── Header ────────────────────────────────────────────────────────────────
-    doc.setFillColor(29, 110, 245);
-    doc.rect(0, 0, W, 20, "F");
-    doc.setTextColor(255, 255, 255);
+    doc.setTextColor(26, 29, 35);
     doc.setFontSize(13); doc.setFont("helvetica", "bold");
-    doc.text("NCR Fleet — Calls Analytics Report", 14, 8);
-    doc.setFontSize(8); doc.setFont("helvetica", "normal");
-    doc.text(`Generated: ${now}   ·   Period: ${periodLabel}${bankFilterLabel ? "   ·   Bank: " + bankFilterLabel : ""}   ·   Total: ${stats.total} calls`, 14, 15);
+    doc.text("Calls Analytics Report", 104, 8);
+    doc.setFontSize(7.5); doc.setFont("helvetica", "normal");
+    doc.text(`Generated: ${now}   ·   Period: ${periodLabel}${bankFilterLabel ? "   ·   Bank: " + bankFilterLabel : ""}   ·   Total: ${stats.total} calls`, 104, 15);
 
     // ── Section 1: Summary stat cards ────────────────────────────────────────
     let y = 26;
@@ -308,7 +309,7 @@ async function exportAnalyticsPDF(
 
     doc.setFontSize(8); doc.setFont("helvetica", "bold");
     doc.setTextColor(74, 82, 96);
-    doc.text("6-Month Trend", barX0, chartAreaY);
+    doc.text("Call Trend", barX0, chartAreaY);
 
     // Legend for bar chart
     const legItems = [
@@ -566,7 +567,7 @@ async function exportAnalyticsPDF(
     for (let p = 1; p <= pages; p++) {
       doc.setPage(p);
       doc.setFontSize(7); doc.setTextColor(150, 150, 150);
-      doc.text(`NCR Fleet · Techmasters Zambia · Page ${p} of ${pages}`, W / 2, 204, { align: "center" });
+      doc.text(`Techmasters Zambia · Page ${p} of ${pages}`, W / 2, 204, { align: "center" });
     }
 
     const slug = periodLabel.replace(/\s+/g, "-").toLowerCase();
@@ -630,23 +631,38 @@ function StatCard({ label, value, color, bg, icon }: any) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function CallsAnalytics({ calls, banks = [] }: { calls: any[]; banks?: any[] }) {
-  const [period, setPeriod]       = useState<"month" | "year">("month");
+  const [period, setPeriod]       = useState<"month" | "year" | "custom">("month");
+  const [customFrom, setCustomFrom] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  });
+  const [customTo, setCustomTo] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  });
   const [bankFilter, setBankFilter] = useState<string>("");
   const [exporting, setExporting]   = useState(false);
   const [exportError, setExportError] = useState("");
   const now = new Date();
+  const dateInputValue = (date: Date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const rangeFrom = period === "custom"
+    ? customFrom
+    : dateInputValue(period === "month" ? new Date(now.getFullYear(), now.getMonth(), 1) : new Date(now.getFullYear(), 0, 1));
+  const rangeTo = period === "custom"
+    ? customTo
+    : dateInputValue(now);
+  const validDateRange = Boolean(rangeFrom && rangeTo && rangeFrom <= rangeTo);
+  const dateKey = (date: Date) => dateInputValue(date);
 
   // ── Scoped calls ────────────────────────────────────────────────────────────
-  const scoped = calls.filter(c => {
+  const scoped = validDateRange ? calls.filter(c => {
     if (!c.created_at) return false;
-    const d = new Date(c.created_at);
-    const inPeriod = period === "month"
-      ? d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
-      : d.getFullYear() === now.getFullYear();
-    if (!inPeriod) return false;
+    const createdDate = dateKey(new Date(c.created_at));
+    if (createdDate < rangeFrom || createdDate > rangeTo) return false;
     if (bankFilter && c.atm?.bank?.short_code !== bankFilter) return false;
     return true;
-  });
+  }) : [];
 
   // ── Derived counts ───────────────────────────────────────────────────────────
   const total    = scoped.length;
@@ -664,14 +680,29 @@ export default function CallsAnalytics({ calls, banks = [] }: { calls: any[]; ba
 
   const stats = { total, resolved, pending, onHold, breached, slaMet, high, medium, low, typeNew, typeOld, typeRepeat };
 
-  // ── 6-month trend ────────────────────────────────────────────────────────────
+  // ── Trend over the selected date range ──────────────────────────────────────
   const months: { label: string; total: number; resolved: number; breached: number }[] = [];
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const label = d.toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
-    const inMonth = calls.filter(c => {
+  const firstRangeDate = validDateRange ? new Date(`${rangeFrom}T00:00:00`) : null;
+  const lastRangeDate = validDateRange ? new Date(`${rangeTo}T00:00:00`) : null;
+  const monthCount = firstRangeDate && lastRangeDate
+    ? (lastRangeDate.getFullYear() - firstRangeDate.getFullYear()) * 12 + lastRangeDate.getMonth() - firstRangeDate.getMonth() + 1
+    : 0;
+  const trendUnit: "month" | "year" = monthCount <= 12 ? "month" : "year";
+  const firstTrendDate = firstRangeDate
+    ? new Date(trendUnit === "month" ? firstRangeDate.getFullYear() : firstRangeDate.getFullYear(), trendUnit === "month" ? firstRangeDate.getMonth() : 0, 1)
+    : null;
+  const lastTrendDate = lastRangeDate
+    ? new Date(trendUnit === "month" ? lastRangeDate.getFullYear() : lastRangeDate.getFullYear(), trendUnit === "month" ? lastRangeDate.getMonth() : 0, 1)
+    : null;
+  for (let d = firstTrendDate; d && lastTrendDate && d <= lastTrendDate; d = new Date(trendUnit === "month" ? d.getFullYear() : d.getFullYear() + 1, trendUnit === "month" ? d.getMonth() + 1 : 0, 1)) {
+    const label = d.toLocaleDateString("en-GB", trendUnit === "month"
+      ? { month: "short", year: "2-digit" }
+      : { year: "numeric" });
+    const inMonth = scoped.filter(c => {
       const cd = new Date(c.created_at);
-      return cd.getFullYear() === d.getFullYear() && cd.getMonth() === d.getMonth();
+      return trendUnit === "month"
+        ? cd.getFullYear() === d.getFullYear() && cd.getMonth() === d.getMonth()
+        : cd.getFullYear() === d.getFullYear();
     });
     months.push({
       label,
@@ -729,9 +760,17 @@ export default function CallsAnalytics({ calls, banks = [] }: { calls: any[]; ba
   const BANK_COLORS = ["#1d6ef5","#10b366","#f59e0b","#ef4444","#7c3aed","#0891b2","#be185d","#065f46"];
   const getBankColor = (idx: number) => BANK_COLORS[idx % BANK_COLORS.length];
 
+  const formatRangeDate = (date: string) => {
+    if (!date) return "Select date";
+    return new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", {
+      day: "2-digit", month: "short", year: "numeric",
+    });
+  };
   const periodLabel = period === "month"
     ? now.toLocaleDateString("en-GB", { month: "long", year: "numeric" })
-    : String(now.getFullYear());
+    : period === "year"
+      ? String(now.getFullYear())
+      : `${formatRangeDate(rangeFrom)} – ${formatRangeDate(rangeTo)}`;
 
   const handleExport = async () => {
     setExporting(true);
@@ -747,34 +786,52 @@ export default function CallsAnalytics({ calls, banks = [] }: { calls: any[]; ba
   };
 
   return (
-    <div style={{ paddingTop: 4 }}>
+    <div className="calls-analytics">
 
       {/* Toolbar — period + bank filter + export */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-        marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
+      <div className="calls-analytics-toolbar">
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <div style={{ fontSize: 13, color: C.textMuted, fontWeight: 500 }}>
+          <div className="calls-analytics-summary">
             Showing: <span style={{ color: C.text, fontWeight: 700 }}>{periodLabel}</span>
             {bankFilter && <span style={{ color: C.accent }}> · {bankFilter}</span>}
             <span style={{ color: C.textMuted }}> · {total} call{total !== 1 ? "s" : ""}</span>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <div className="calls-analytics-controls">
           {/* Period toggle */}
-          <div style={{ display: "flex", gap: 4, background: C.surface,
-            borderRadius: 10, padding: 3, border: `1px solid ${C.border}` }}>
-            {(["month", "year"] as const).map(p => (
-              <button key={p} onClick={() => setPeriod(p)} style={{
-                padding: "6px 16px", borderRadius: 8, border: "none", cursor: "pointer",
+          <div className="calls-period-toggle">
+            {(["month", "year", "custom"] as const).map(p => (
+              <button key={p} className={`calls-period-button${period===p?" is-active":""}`} onClick={() => setPeriod(p)} style={{
+                padding: "6px 12px", borderRadius: 8, border: "none", cursor: "pointer",
                 fontFamily: "inherit", fontSize: 12, fontWeight: 600,
                 background: period === p ? C.primary : "transparent",
                 color: period === p ? "#fff" : C.textMid,
-              }}>{p === "month" ? "This Month" : "This Year"}</button>
+              }}>{p === "month" ? "This Month" : p === "year" ? "This Year" : "Custom Range"}</button>
             ))}
           </div>
+          {period === "custom" && (
+            <div className="calls-custom-range">
+              <label className="calls-date-field">
+                From
+                <input type="date" value={customFrom} max={customTo || undefined}
+                  onChange={e => setCustomFrom(e.target.value)} className="calls-control" style={{
+                    display: "block", marginTop: 3, padding: "6px 8px", borderRadius: 8,
+                    border: `1px solid ${C.border}`, fontFamily: "inherit", color: C.text,
+                  }} />
+              </label>
+              <label className="calls-date-field">
+                To
+                <input type="date" value={customTo} min={customFrom || undefined}
+                  onChange={e => setCustomTo(e.target.value)} className="calls-control" style={{
+                    display: "block", marginTop: 3, padding: "6px 8px", borderRadius: 8,
+                    border: `1px solid ${C.border}`, fontFamily: "inherit", color: C.text,
+                  }} />
+              </label>
+            </div>
+          )}
           {/* Bank filter */}
           {banks.length > 0 && (
-            <select value={bankFilter} onChange={e => setBankFilter(e.target.value)} style={{
+            <select className="calls-control calls-bank-filter" value={bankFilter} onChange={e => setBankFilter(e.target.value)} style={{
               padding: "7px 12px", borderRadius: 10, fontSize: 12, fontFamily: "inherit",
               border: `1px solid ${bankFilter ? C.accent : C.border}`,
               color: bankFilter ? C.accent : C.textMid,
@@ -789,7 +846,7 @@ export default function CallsAnalytics({ calls, banks = [] }: { calls: any[]; ba
             </select>
           )}
           {/* Export */}
-          <button onClick={handleExport} disabled={exporting || total === 0} style={{
+          <button className="calls-action-button calls-action-button--primary" onClick={handleExport} disabled={exporting || total === 0} style={{
             background: exporting ? C.surface : C.primary,
             color: exporting ? C.textMuted : "#fff",
             border: `1px solid ${exporting ? C.border : C.primary}`,
@@ -801,6 +858,13 @@ export default function CallsAnalytics({ calls, banks = [] }: { calls: any[]; ba
           </button>
         </div>
       </div>
+
+      {!validDateRange && (
+        <div style={{ background: C.dangerLight, border: "1px solid #fecaca", borderRadius: 10,
+          padding: "10px 14px", fontSize: 13, color: C.danger, fontWeight: 600, marginBottom: 16 }}>
+          Choose a valid date range with the start date on or before the end date.
+        </div>
+      )}
 
       {exportError && (
         <div style={{ background: C.dangerLight, border: `1px solid #fecaca`, borderRadius: 10,
@@ -902,7 +966,7 @@ export default function CallsAnalytics({ calls, banks = [] }: { calls: any[]; ba
         </div>
       </div>
 
-      {/* Call type + 6-month trend */}
+      {/* Call type + selected-range trend */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12, marginBottom: 20 }}>
 
         {/* Call type */}
@@ -928,10 +992,12 @@ export default function CallsAnalytics({ calls, banks = [] }: { calls: any[]; ba
           })}
         </div>
 
-        {/* 6-month bar chart */}
+        {/* Selected-range bar chart */}
         <div style={{ background: C.white, borderRadius: 16, border: `1px solid ${C.border}`, padding: "18px 20px" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>6-Month Trend</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
+              {trendUnit === "month" ? "Monthly Trend" : "Yearly Trend"}
+            </div>
             <div style={{ display: "flex", gap: 12, fontSize: 11 }}>
               {[{ label: "Total", color: C.accent }, { label: "Resolved", color: C.success }, { label: "Breached", color: C.danger }]
                 .map(({ label, color }) => (

@@ -1,0 +1,172 @@
+.engineer-jobcard-list-card {
+  min-width: 0;
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+
+.engineer-jobcard-list-card:hover {
+  border-color: #cbd9ed;
+  box-shadow: 0 7px 20px rgba(23, 45, 75, .09);
+  transform: translateY(-1px);
+}
+
+.engineer-jobcard-list-card:focus-within {
+  outline: 2px solid #9bbdf3;
+  outline-offset: 2px;
+}
+
+.engineer-jobcard-list-meta > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  overflow-wrap: anywhere;
+  color: #4b5260;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.engineer-jobcard-list-meta small {
+  color: #8b909a;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+.engineer-jobcard-now-field {
+  display: flex;
+  min-width: 0;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.engineer-jobcard-now-field > input {
+  min-width: 0;
+  flex: 1;
+}
+
+.engineer-jobcard-now {
+  min-width: 54px;
+  padding: 0 12px;
+  border: 1px solid #bfd0e8;
+  border-radius: 9px;
+  color: #1d5baa;
+  background: #f2f7ff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+
+.engineer-jobcard-now:hover {
+  border-color: #8eadd8;
+  background: #e6f0ff;
+}
+
+.engineer-jobcard-now:focus-visible {
+  outline: 2px solid #7fa8e4;
+  outline-offset: 2px;
+}
+
+.engineer-jobcard-detail-info > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.engineer-jobcard-detail-info > div > div:last-child {
+  overflow-wrap: anywhere;
+}
+
+.engineer-jobcard-checklist {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.engineer-jobcard-check-row {
+  align-items: flex-start;
+}
+
+.engineer-jobcard-check-row > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.engineer-jobcard-detail img {
+  max-width: 100%;
+}
+
+@media (max-width: 768px) {
+  .engineer-jobcards-heading {
+    align-items: flex-start !important;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .engineer-jobcards-filters {
+    flex-wrap: wrap;
+    overflow: visible !important;
+  }
+
+  .engineer-jobcard-list-card {
+    padding: 12px !important;
+    border-radius: 12px !important;
+  }
+
+  .engineer-jobcard-list-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .engineer-jobcard-detail-info {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+    padding: 12px !important;
+  }
+
+  .engineer-jobcard-date-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .engineer-jobcard-list-header {
+    flex-wrap: wrap;
+  }
+
+  .engineer-jobcard-list-status {
+    flex-direction: row !important;
+    align-items: center !important;
+    flex-wrap: wrap;
+  }
+
+  .engineer-jobcard-terminal {
+    font-size: 13px !important;
+    overflow-wrap: anywhere;
+  }
+
+  .engineer-jobcard-site,
+  .engineer-jobcard-type {
+    overflow-wrap: anywhere;
+  }
+
+  .engineer-jobcard-list-meta {
+    gap: 7px 5px !important;
+  }
+
+  .engineer-jobcard-detail-info {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .engineer-jobcard-date-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .engineer-jobcard-check-row {
+    flex-wrap: wrap;
+  }
+
+  .engineer-jobcard-now {
+    min-width: 48px;
+    padding: 0 8px;
+  }
+}

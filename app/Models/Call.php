@@ -44,8 +44,9 @@ class Call extends Model
     public function isSlaBreached(): bool
     {
         if (!$this->sla_breach_at) return false;
-        if ($this->status === 'resolved' && $this->closed_at) {
-            return $this->closed_at->gt($this->sla_breach_at);
+        if ($this->status === 'resolved') {
+            $resolvedAt = $this->resolved_at ?? $this->closed_at;
+            return $resolvedAt ? $resolvedAt->gt($this->sla_breach_at) : false;
         }
         return now()->gt($this->sla_breach_at);
     }

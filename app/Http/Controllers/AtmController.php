@@ -19,6 +19,7 @@ class AtmController extends Controller
             'bank_id'       => 'required|exists:banks,id',
             'engineer_id'   => 'nullable|exists:engineers,id',
             'status'        => ['required', Rule::in(['Active','Offline','Under Maintenance','Decommissioned'])],
+            'has_gbna'      => 'boolean',
             'install_date'  => 'nullable|date',
             'notes'         => 'nullable|string',
         ]);
@@ -38,6 +39,7 @@ class AtmController extends Controller
             'bank_id'       => 'required|exists:banks,id',
             'engineer_id'   => 'nullable|exists:engineers,id',
             'status'        => ['required', Rule::in(['Active','Offline','Under Maintenance','Decommissioned'])],
+            'has_gbna'      => 'boolean',
             'install_date'  => 'nullable|date',
             'notes'         => 'nullable|string',
         ]);
@@ -61,6 +63,17 @@ class AtmController extends Controller
         ]);
 
         Atm::whereIn('id', $request->ids)->update(['status' => $request->status]);
+        return redirect()->back();
+    }
+
+    public function bulkGbna(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => 'required|array|min:1',
+            'ids.*' => 'required|integer|distinct|exists:atms,id',
+        ]);
+
+        Atm::whereIn('id', $validated['ids'])->update(['has_gbna' => true]);
         return redirect()->back();
     }
 

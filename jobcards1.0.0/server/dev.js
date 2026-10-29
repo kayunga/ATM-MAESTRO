@@ -1,0 +1,22 @@
+// Local-only: mounts the same handlers Vercel runs, so offline tests match production.
+import express from "express";
+import login from "../api/login.js";
+import logout from "../api/logout.js";
+import me from "../api/me.js";
+import profile from "../api/profile.js";
+import bootstrap from "../api/bootstrap.js";
+import jobs from "../api/jobs/index.js";
+import job from "../api/jobs/[jobNo].js";
+import admin from "../api/admin/[...slug].js";
+const app = express();
+app.use(express.json({ limit: "4mb" }));
+const w = (h) => (req, res) => Promise.resolve(h(req, res)).catch((e) => { console.error(e); res.status(500).json({ error: "Server error" }); });
+app.all("/api/login", w(login));
+app.all("/api/logout", w(logout));
+app.all("/api/me", w(me));
+app.all("/api/profile", w(profile));
+app.all("/api/bootstrap", w(bootstrap));
+app.all("/api/jobs", w(jobs));
+app.all("/api/jobs/:jobNo", w((req, res) => { req.query = { ...req.query, jobNo: req.params.jobNo }; return job(req, res); }));
+app.all("/api/admin/*", w((req, res) => { req.query = { ...req.query, slug: req.params[0].split("/").filter(Boolean) }; return admin(req, res); }));
+app.listen(3001, () => console.log("API on http://localhost:3001"));

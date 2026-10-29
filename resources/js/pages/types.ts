@@ -34,6 +34,8 @@ export interface Atm {
   bankId: number;
   engineerId: number;
   status: string;
+  has_gbna?: boolean;
+  hasGbna?: boolean;
   installDate?: string;
   notes?: string;
   // raw Laravel snake_case
@@ -103,4 +105,5 @@ export interface PageProps {
   banks: Bank[];
   engineers: Engineer[];
   maintenance: MaintenanceRecord[];
+  pendingJobCardsCount?: number;
 }

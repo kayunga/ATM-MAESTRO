@@ -15,14 +15,14 @@ class AdminUserSeeder extends Seeder
             [
                 'name'     => 'Admin',
                 'email'    => 'admin@techmasters.zm',
-                'password' => Hash::make('admin123'),
+                'password' => Hash::make('admin@123'),
                 'is_admin' => true,
             ]
         );
 
         $this->command->info('✓ Admin user created:');
         $this->command->info('  Email:    admin@techmasters.zm');
-        $this->command->info('  Password: Admin@123');
+        $this->command->info('  Password: admin@123');
         $this->command->info('  ⚠  Change this password after first login!');
     }
 }

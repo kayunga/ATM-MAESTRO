@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Atm;
 use App\Models\Bank;
 use App\Models\Engineer;
+use App\Models\JobCard;
 use App\Models\MaintenanceRecord;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -39,12 +40,25 @@ class AtmFleetController extends Controller
                     'phone'   => $e->phone,
                     'email'   => $e->email,
                     'region'  => $e->region,
+                    'signature' => $e->signature,
                     'user_id' => $e->user_id,
                 ]),
 
             'maintenance' => MaintenanceRecord::with(['atm', 'engineer'])
                 ->orderByDesc('scheduled_date')
                 ->get(),
+
+            'approvedPmCards' => JobCard::query()
+                ->where('status', 'approved')
+                ->where(function ($query) {
+                    $query->where('job_type', 'maintenance')
+                        ->orWhere('type', 'Quarterly PM');
+                })
+                ->get(['atm_id', 'engineer_id', 'quarter', 'year', 'job_type', 'type']),
+
+            'pendingJobCardsCount' => JobCard::query()
+                ->where('status', 'submitted')
+                ->count(),
         ]);
     }
 }

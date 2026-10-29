@@ -16,11 +16,17 @@ class JobCard extends Model
         'hours_spent', 'scheduled_date', 'completed_date',
         'quarter', 'year', 'status', 'rejection_reason',
         'photos', 'notes', 'submitted_at', 'reviewed_at',
+        'job_type', 'start_time', 'end_time', 'fault_category',
+        'checklist', 'atm_status', 'technician_signature', 'phone_support',
+        'custodian1_name', 'custodian1_signature',
+        'custodian2_name', 'custodian2_signature',
     ];
 
     protected $casts = [
         'photos'         => 'array',
         'attachments'    => 'array',
+        'checklist'      => 'array',
+        'phone_support'  => 'boolean',
         'scheduled_date' => 'date',
         'completed_date' => 'date',
         'submitted_at'   => 'datetime',

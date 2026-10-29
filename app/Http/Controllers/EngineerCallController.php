@@ -48,10 +48,17 @@ class EngineerCallController extends Controller
         }
 
         $data = $request->validate([
-            'resolution_notes' => ['required', 'string', 'min:10'],
             'closed_at'        => ['required', 'date'],   // custom datetime from engineer
-            'work_description' => ['required', 'string'],
+            'fault_category'   => ['required', 'string', 'max:100'],
+            'work_description' => ['required', 'string', 'min:10'],
             'parts_used'       => ['nullable', 'string'],
+            'atm_status'       => ['required', 'in:In Service,Out of Service,Pending Parts'],
+            'start_time'       => ['required', 'date_format:H:i'],
+            'phone_support'    => ['required', 'boolean'],
+            'custodian1_name'  => ['nullable', 'required_if:phone_support,0', 'string', 'max:255'],
+            'custodian1_signature' => ['nullable', 'required_if:phone_support,0', 'string', 'max:500000'],
+            'custodian2_name'  => ['nullable', 'required_with:custodian2_signature', 'string', 'max:255'],
+            'custodian2_signature' => ['nullable', 'required_with:custodian2_name', 'string', 'max:500000'],
             'notes'            => ['nullable', 'string'],
             'submit_now'       => ['nullable'],
             'files'            => ['nullable', 'array', 'max:10'],
@@ -60,6 +67,9 @@ class EngineerCallController extends Controller
 
         $closedAt    = \Carbon\Carbon::parse($data['closed_at']);
         $submitNow   = filter_var($request->input('submit_now'), FILTER_VALIDATE_BOOLEAN);
+        if ($submitNow && !$engineer->signature) {
+            return response()->json(['message' => 'Add your engineer signature in your profile before submitting a job card.'], 422);
+        }
         $attachments = [];
 
         if ($request->hasFile('files')) {
@@ -74,21 +84,37 @@ class EngineerCallController extends Controller
             }
         }
 
-        // Determine if SLA was breached at close time
-        $slaBreached = $call->sla_breach_at && $closedAt->gt($call->sla_breach_at);
+        // SLA duration ends when the call is resolved, not at the work-card timestamp.
+        $resolvedAt = now();
+        $slaBreached = $call->sla_breach_at && $resolvedAt->gt($call->sla_breach_at);
 
         // Create job card linked to this call
         $quarter = (int) ceil($closedAt->month / 3);
+        $startedAt = $closedAt->copy()->setTimeFromTimeString($data['start_time']);
+        if ($startedAt->gt($closedAt)) {
+            $startedAt->subDay();
+        }
         JobCard::create([
             'atm_id'           => $call->atm_id,
             'engineer_id'      => $engineer->id,
             'call_id'          => $call->id,
             'type'             => 'Emergency',
+            'job_type'         => 'repair',
             'work_description' => $data['work_description'],
+            'fault_category'   => $data['fault_category'],
             'parts_used'       => $data['parts_used'] ?? null,
-            'hours_spent'      => round($call->created_at->diffInMinutes($closedAt) / 60, 1),
-            'scheduled_date'   => $call->created_at->format('Y-m-d'),
+            'hours_spent'      => round($startedAt->diffInMinutes($closedAt) / 60, 1),
+            'scheduled_date'   => $startedAt->format('Y-m-d'),
             'completed_date'   => $closedAt->format('Y-m-d'),
+            'start_time'       => $startedAt->format('H:i:s'),
+            'end_time'         => $closedAt->format('H:i:s'),
+            'atm_status'       => $data['atm_status'],
+            'technician_signature' => $submitNow ? $engineer->signature : null,
+            'custodian1_name'  => $data['custodian1_name'] ?? null,
+            'custodian1_signature' => $data['custodian1_signature'] ?? null,
+            'custodian2_name'  => $data['custodian2_name'] ?? null,
+            'custodian2_signature' => $data['custodian2_signature'] ?? null,
+            'phone_support'    => $data['phone_support'],
             'quarter'          => $quarter,
             'year'             => $closedAt->year,
             'notes'            => $data['notes'] ?? null,
@@ -100,8 +126,8 @@ class EngineerCallController extends Controller
         // Resolve the call
         $call->update([
             'status'               => 'resolved',
-            'resolution_notes'     => $data['resolution_notes'],
-            'resolved_at'          => now(),
+            'resolution_notes'     => $data['work_description'],
+            'resolved_at'          => $resolvedAt,
             'closed_at'            => $closedAt,
             'sla_breached'         => $slaBreached,
             'assigned_engineer_id' => $engineer->id,
