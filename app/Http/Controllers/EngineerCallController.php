@@ -16,6 +16,15 @@ class EngineerCallController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $filters = $request->validate([
+            'scope' => ['sometimes', 'in:all,mine'],
+            'status' => ['sometimes', 'in:pending,assigned,on_hold,escalated'],
+            'priority' => ['sometimes', 'in:low,medium,high'],
+            'search' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'per_page' => ['sometimes', 'integer', 'between:1,100'],
+            'include_resolved' => ['sometimes', 'boolean'],
+        ]);
+
         // Refresh sla_breached flags
         Call::whereNotIn('status', ['resolved','escalated'])
             ->whereNotNull('sla_breach_at')
@@ -29,14 +38,38 @@ class EngineerCallController extends Controller
             ->whereDate('created_at', '<', now()->toDateString())
             ->update(['call_type' => 'old']);
 
-        $calls = Call::with(['atm.bank', 'engineer', 'jobCards'])
-            ->whereNotIn('status', ['resolved'])
+        $query = Call::with(['atm.bank', 'engineer', 'jobCards'])
+            ->when(
+                !($filters['include_resolved'] ?? false) || ($filters['scope'] ?? 'all') !== 'mine',
+                fn($query) => $query->whereNotIn('status', ['resolved']),
+            )
+            ->when(($filters['scope'] ?? 'all') === 'mine', function ($query) use ($request): void {
+                $engineer = Engineer::where('user_id', $request->user()->id)->firstOrFail();
+                $query->where('assigned_engineer_id', $engineer->id);
+            })
+            ->when(isset($filters['status']), fn($query) => $query->where('status', $filters['status']))
+            ->when(isset($filters['priority']), fn($query) => $query->where('priority', $filters['priority']))
+            ->when(!empty($filters['search']), function ($query) use ($filters): void {
+                $search = trim($filters['search']);
+                $query->where(function ($matches) use ($search): void {
+                    if (ctype_digit($search)) {
+                        $matches->where('id', (int) $search);
+                    }
+                    $matches->orWhere('fault_description', 'like', "%{$search}%")
+                        ->orWhereHas('atm', fn($atm) => $atm->where('terminal_id', 'like', "%{$search}%")
+                            ->orWhere('location', 'like', "%{$search}%"));
+                });
+            })
             ->orderByRaw("CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END")
-            ->orderByDesc('created_at')
-            ->get()
-            ->map(fn($c) => $this->format($c));
+            ->orderByDesc('created_at');
 
-        return response()->json($calls);
+        if ($request->is('api/v1/*')) {
+            return response()->json(
+                $query->paginate($filters['per_page'] ?? 25)->through(fn($call) => $this->format($call))
+            );
+        }
+
+        return response()->json($query->get()->map(fn($call) => $this->format($call)));
     }
 
     public function close(Request $request, Call $call): JsonResponse
@@ -201,6 +234,7 @@ class EngineerCallController extends Controller
         $slaStatus   = $slaBreachAt
             ? ($now->gt($slaBreachAt) ? 'breached' : 'active')
             : 'none';
+        $slaBreached = $slaStatus === 'breached';
 
         return [
             'id'                => $call->id,
@@ -212,9 +246,12 @@ class EngineerCallController extends Controller
             'resolution_notes'  => $call->resolution_notes,
             'created_at'        => $call->created_at->toISOString(),
             'assigned_at'       => $call->assigned_at?->toISOString(),
-            'created_at'        => $call->created_at->toISOString(),
+            'resolved_at'       => $call->resolved_at?->toISOString(),
+            'escalated_at'      => $call->escalated_at?->toISOString(),
+            'closed_at'         => $call->closed_at?->toISOString(),
             'sla_breach_at'     => $slaBreachAt?->toISOString(),
             'sla_status'        => $slaStatus,
+            'sla_breached'      => $slaBreached,
             'sla_minutes'       => $slaMinutes,
             'sla_hours_allowed' => self::SLA_HOURS[$call->priority] ?? 3,
             'job_cards_count'   => $call->jobCards->count(),

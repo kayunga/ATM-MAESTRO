@@ -50,7 +50,6 @@ Route::middleware(['auth', 'admin'])->group(function () {
     Route::get ('/job-cards/data',               [JobCardController::class, 'adminIndex']);
     Route::post('/job-cards/{jobCard}/approve',  [JobCardController::class, 'approve']);
     Route::post('/job-cards/{jobCard}/reject',   [JobCardController::class, 'reject']);
-    Route::post('/job-cards/bulk-download',      [JobCardDownloadController::class, 'bulk'])->name('job-cards.bulk-download');
 });
 
 // ── Calls (admin CRUD) ───────────────────────────────────────────────────────

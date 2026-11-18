@@ -70,7 +70,7 @@
         "lightningcss-linux-x64-gnu": "^1.29.1",
         "lightningcss-win32-x64-msvc": "^1.29.1"
     },
-    "name": "atm-maestrov2",
+    "name": "atm-maestro",
     "version": "1.0.0",
     "description": "",
     "main": "eslint.config.js",

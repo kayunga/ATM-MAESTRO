@@ -124,13 +124,15 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
   flex: 1;
   min-width: min(100%, 300px);
 }
 
 .jobcards-search,
-.jobcards-type-filter {
+.jobcards-type-filter,
+.jobcards-filter-select {
   min-height: 36px;
   padding: 7px 10px;
   border: 1px solid #dfe5ed;
@@ -144,8 +146,10 @@
 
 .jobcards-search { width: min(100%, 280px); }
 .jobcards-type-filter { min-width: 130px; cursor: pointer; }
+.jobcards-filter-select { min-width: 105px; cursor: pointer; }
 .jobcards-search:focus,
-.jobcards-type-filter:focus { border-color: #1d6ef5; box-shadow: 0 0 0 3px #eef3fe; }
+.jobcards-type-filter:focus,
+.jobcards-filter-select:focus { border-color: #1d6ef5; box-shadow: 0 0 0 3px #eef3fe; }
 
 .jobcards-filter {
   display: inline-flex;
@@ -202,6 +206,21 @@
   border-left: 1px solid #e2e7ee;
   color: #315d9f;
   font-weight: 700;
+}
+
+.jobcards-download-message {
+  margin: 0 18px 12px;
+  padding: 10px 12px;
+  border: 1px solid #cfe2ff;
+  border-radius: 8px;
+  color: #174fae;
+  background: #f3f7ff;
+  font-size: 12px;
+}
+.jobcards-download-message.is-error {
+  border-color: #fecaca;
+  color: #bd4d4d;
+  background: #fff0ef;
 }
 
 .jobcards-table-scroll { width: 100%; overflow-x: auto; }
@@ -409,5 +428,7 @@
   .jobcards-list-controls { min-width: 0; width: 100%; }
   .jobcards-search { width: 100%; min-width: 0; }
   .jobcards-type-filter { min-width: 120px; }
+  .jobcards-filter-select { flex: 1; min-width: 100px; }
   .jobcards-board-summary { padding: 0 12px 10px; }
+  .jobcards-download-message { margin-right: 12px; margin-left: 12px; }
 }

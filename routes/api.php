@@ -1,11 +1,10 @@
 <?php
+
 // routes/api.php
 
-use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\AtmController;
-use App\Http\Controllers\MaintenanceController;
-use App\Http\Controllers\EngineerController;
-
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\EngineerAtmController;
+use App\Http\Controllers\Api\JobCardController as ApiJobCardController;
 /*
 |--------------------------------------------------------------------------
 | NCR ATM Fleet Manager — API Routes
@@ -16,55 +15,66 @@ use App\Http\Controllers\EngineerController;
 |
 */
 
-// ── Dashboard ──────────────────────────────────────────────────────────────
-Route::get('/stats', [AtmController::class, 'stats']);
-
-// ── ATMs ───────────────────────────────────────────────────────────────────
-Route::apiResource('atms', AtmController::class);
-// GET    /api/atms           → index  (supports ?search=, ?status=, ?engineer_id=)
-// POST   /api/atms           → store
-// GET    /api/atms/{id}      → show   (includes maintenance records)
-// PUT    /api/atms/{id}      → update
-// DELETE /api/atms/{id}      → destroy
-
-// ── Maintenance ────────────────────────────────────────────────────────────
-// Native JSON maintenance endpoints have been moved into auth:sanctum
-// below, using Api\MaintenanceController.
-
-// ── Engineers ──────────────────────────────────────────────────────────────
-Route::apiResource('engineers', EngineerController::class);
-// GET    /api/engineers       → index  (supports ?region=)
-// POST   /api/engineers       → store
-// GET    /api/engineers/{id}  → show   (includes assigned ATMs)
-// PUT    /api/engineers/{id}  → update
-// DELETE /api/engineers/{id}  → destroy
-
-// ── Mobile Engineer App APIs ───────────────────────────────────────────────
-use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\EngineerAtmController;
-use App\Http\Controllers\Api\JobCardController as ApiJobCardController;
+use App\Http\Controllers\Api\MaintenanceController as ApiMaintenanceController;
+use App\Http\Controllers\AtmController;
 use App\Http\Controllers\EngineerCallController;
+use App\Http\Controllers\EngineerController;
+use App\Http\Controllers\JobCardDownloadController;
+use Illuminate\Support\Facades\Route;
 
-Route::post('/login', [AuthController::class, 'login']);
+// Legacy fleet endpoints are restricted to authenticated administrators.
+Route::middleware(['auth:sanctum', 'admin'])->group(function () {
+    Route::get('/stats', [AtmController::class, 'stats']);
+    Route::apiResource('atms', AtmController::class);
+    Route::apiResource('engineers', EngineerController::class);
+});
 
+// Keep the original engineer endpoints available while mobile clients migrate.
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:6,1');
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
-
     Route::get('/engineer/atms', [EngineerAtmController::class, 'index']);
-
-    // Maintenance PMs
-    Route::get('/maintenance', [\App\Http\Controllers\Api\MaintenanceController::class, 'index']);
-
-    // Job Cards
+    Route::get('/maintenance', [ApiMaintenanceController::class, 'index']);
     Route::apiResource('engineer/job-cards', ApiJobCardController::class)->except(['create', 'edit']);
     Route::post('/engineer/job-cards/{jobCard}/photos', [ApiJobCardController::class, 'uploadPhotos']);
     Route::post('/engineer/job-cards/{jobCard}/submit', [ApiJobCardController::class, 'submit']);
-
-    // Calls (reusing EngineerCallController endpoints with json response)
     Route::get('/engineer/calls', [EngineerCallController::class, 'index']);
     Route::post('/engineer/calls/{call}/close', [EngineerCallController::class, 'close']);
     Route::post('/engineer/calls/{call}/note', [EngineerCallController::class, 'saveNote']);
     Route::post('/engineer/calls/{call}/assign', [EngineerCallController::class, 'assign']);
     Route::post('/engineer/calls/{call}/return', [EngineerCallController::class, 'returnCall']);
+});
+
+// Versioned mobile engineer API. The old paths above remain compatibility aliases.
+Route::prefix('v1')->name('api.v1.')->group(function () {
+    Route::post('/auth/login', [AuthController::class, 'login'])
+        ->middleware('throttle:6,1')
+        ->name('auth.login');
+
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::post('/auth/logout', [AuthController::class, 'logout'])->name('auth.logout');
+        Route::get('/me', [AuthController::class, 'me'])->name('me');
+        Route::put('/me/signature', [AuthController::class, 'updateSignature'])->name('me.signature.update');
+        Route::put('/me/password', [AuthController::class, 'updatePassword'])->name('me.password.update');
+
+        Route::get('/engineer/atms', [EngineerAtmController::class, 'index'])->name('engineer.atms.index');
+        Route::get('/maintenance', [ApiMaintenanceController::class, 'index'])->name('maintenance.index');
+
+        Route::apiResource('engineer/job-cards', ApiJobCardController::class)
+            ->except(['create', 'edit'])
+            ->names('engineer.job-cards');
+        Route::post('/engineer/job-cards/{jobCard}/photos', [ApiJobCardController::class, 'uploadPhotos'])
+            ->name('engineer.job-cards.photos');
+        Route::post('/engineer/job-cards/{jobCard}/submit', [ApiJobCardController::class, 'submit'])
+            ->name('engineer.job-cards.submit');
+        Route::get('/engineer/job-cards/{jobCard}/print', [JobCardDownloadController::class, 'printCard'])
+            ->name('engineer.job-cards.print');
+
+        Route::get('/engineer/calls', [EngineerCallController::class, 'index'])->name('engineer.calls.index');
+        Route::post('/engineer/calls/{call}/close', [EngineerCallController::class, 'close'])->name('engineer.calls.close');
+        Route::post('/engineer/calls/{call}/note', [EngineerCallController::class, 'saveNote'])->name('engineer.calls.note');
+        Route::post('/engineer/calls/{call}/assign', [EngineerCallController::class, 'assign'])->name('engineer.calls.assign');
+        Route::post('/engineer/calls/{call}/return', [EngineerCallController::class, 'returnCall'])->name('engineer.calls.return');
+    });
 });

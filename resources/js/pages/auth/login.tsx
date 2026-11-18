@@ -24,8 +24,8 @@ export default function Login() {
         {/* Logo */}
         <div style={s.logoWrap}>
           <div style={s.logoBox}>🏧</div>
-          <div style={s.logoText}>NCR Fleet</div>
-          <div style={s.logoSub}>ATM MANAGER</div>
+          <div style={s.logoText}>ATM Maestro</div>
+          <div style={s.logoSub}>ATM MANAGEMENT</div>
         </div>
 
         <h1 style={s.title}>Sign In</h1>
@@ -86,7 +86,7 @@ export default function Login() {
 
         </form>
 
-        <p style={s.footer}>NCR Fleet · Techmasters Zambia</p>
+        <p style={s.footer}>ATM Maestro · Techmasters Zambia</p>
         <p style={{...s.footer, marginTop:8, fontSize:11}}>Admins → dashboard &nbsp;·&nbsp; Engineers → portal</p>
       </div>
     </div>

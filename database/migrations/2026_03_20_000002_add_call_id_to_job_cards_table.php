@@ -20,8 +20,7 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('job_cards', function (Blueprint $table) {
-            $table->dropForeignIdFor(\App\Models\Call::class);
-            $table->dropColumn('call_id');
+            $table->dropConstrainedForeignIdFor(\App\Models\Call::class);
         });
     }
 };

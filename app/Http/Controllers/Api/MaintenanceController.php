@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Engineer;
 use App\Models\MaintenanceRecord;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -11,33 +12,29 @@ class MaintenanceController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        $filters = $request->validate([
+            'atm_id' => ['sometimes', 'integer', 'exists:atms,id'],
+            'status' => ['sometimes', 'nullable', 'string', 'max:40'],
+            'type' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'quarter' => ['sometimes', 'integer', 'between:1,4'],
+            'year' => ['sometimes', 'integer', 'min:2020', 'max:2100'],
+            'per_page' => ['sometimes', 'integer', 'between:1,100'],
+        ]);
         $query = MaintenanceRecord::with(['atm.bank']);
 
-        if ($request->has('atm_id')) {
-            $query->where('atm_id', $request->query('atm_id'));
-        }
-        if ($request->has('status')) {
-            $query->where('status', $request->query('status'));
-        }
-        if ($request->has('type')) {
-            $query->where('type', $request->query('type'));
-        }
-        if ($request->has('quarter')) {
-            $query->where('quarter', $request->query('quarter'));
-        }
-        if ($request->has('year')) {
-            $query->where('year', $request->query('year'));
-        }
+        $query->when(isset($filters['atm_id']), fn($query) => $query->where('atm_id', $filters['atm_id']))
+            ->when(!empty($filters['status']), fn($query) => $query->where('status', $filters['status']))
+            ->when(!empty($filters['type']), fn($query) => $query->where('type', $filters['type']))
+            ->when(isset($filters['quarter']), fn($query) => $query->where('quarter', $filters['quarter']))
+            ->when(isset($filters['year']), fn($query) => $query->where('year', $filters['year']));
 
         // Only return records assigned to the current engineer, unless admin
         if ($request->user() && !$request->user()->is_admin) {
-            $engineer = \App\Models\Engineer::where('user_id', $request->user()->id)->first();
-            if ($engineer) {
-                $query->where('engineer_id', $engineer->id);
-            }
+            $engineer = Engineer::where('user_id', $request->user()->id)->firstOrFail();
+            $query->where('engineer_id', $engineer->id);
         }
 
-        $records = $query->orderBy('scheduled_date', 'asc')->get()->map(function ($record) {
+        $formatRecord = function ($record): array {
             return [
                 'id' => $record->id,
                 'atm_id' => $record->atm_id,
@@ -57,8 +54,15 @@ class MaintenanceController extends Controller
                     ] : null,
                 ] : null,
             ];
-        });
+        };
 
-        return response()->json($records);
+        $query->orderBy('scheduled_date')->orderBy('id');
+        if ($request->is('api/v1/*')) {
+            return response()->json(
+                $query->paginate($filters['per_page'] ?? 25)->through($formatRecord)
+            );
+        }
+
+        return response()->json($query->get()->map($formatRecord));
     }
 }

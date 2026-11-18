@@ -2,6 +2,7 @@
 /* eslint-disable */
 import { useState, useEffect, useCallback } from "react";
 import CallsAnalytics from "./CallsAnalytics";
+import { DatePicker } from "./components/ui";
 import { addCompanyLogo } from "./helpers";
 import "./calls-ui.css";
 
@@ -35,20 +36,9 @@ async function exportCallsPDF(calls: any[], filters: any, onError: (m:string)=>v
     // ─── Helpers ──────────────────────────────────────────────────────────────
     const ri = (n:number) => Math.round(n);
 
-    // Draw a filled rounded rectangle (jsPDF roundedRect is unreliable)
+    // Draw a filled rounded rectangle using jsPDF's native shape API.
     const filledRounded = (x:number,y:number,w:number,h:number,r:number,style:"F"|"FD"="F") => {
-      r = Math.min(r, w/2, h/2);
-      doc.moveTo(x+r, y);
-      doc.lineTo(x+w-r, y);
-      doc.curveTo(x+w, y, x+w, y, x+w, y+r);
-      doc.lineTo(x+w, y+h-r);
-      doc.curveTo(x+w, y+h, x+w, y+h, x+w-r, y+h);
-      doc.lineTo(x+r, y+h);
-      doc.curveTo(x, y+h, x, y+h, x, y+h-r);
-      doc.lineTo(x, y+r);
-      doc.curveTo(x, y, x, y, x+r, y);
-      doc.close();
-      if (style==="FD") doc.fillStroke(); else doc.fill();
+      doc.roundedRect(x, y, w, h, r, r, style);
     };
 
     // ─── Header ───────────────────────────────────────────────────────────────
@@ -75,11 +65,11 @@ async function exportCallsPDF(calls: any[], filters: any, onError: (m:string)=>v
 
     // ─── Summary cards ────────────────────────────────────────────────────────
     const total    = calls.length;
-    const closed   = calls.filter(c=>c.status==="resolved"||c.status==="escalated").length;
-    const active   = calls.filter(c=>c.status==="pending"||c.status==="assigned").length;
+    const closed   = calls.filter(c=>c.status==="resolved").length;
+    const active   = calls.filter(c=>c.status!=="resolved"&&c.status!=="on_hold").length;
     const onHold   = calls.filter(c=>c.status==="on_hold").length;
     const breached = calls.filter(c=>c.sla_breached).length;
-    const slamet   = calls.filter(c=>(c.status==="resolved"||c.status==="escalated")&&!c.sla_breached).length;
+    const slamet   = calls.filter(c=>c.status==="resolved"&&!c.sla_breached).length;
     const highP    = calls.filter(c=>c.priority==="high").length;
     const midP     = calls.filter(c=>c.priority==="medium").length;
     const lowP     = calls.filter(c=>c.priority==="low").length;
@@ -134,7 +124,7 @@ async function exportCallsPDF(calls: any[], filters: any, onError: (m:string)=>v
       const parseD  = (s:any) => { if(!s) return null; const d=new Date(String(s).replace(" ","T")); return isNaN(d.getTime())?null:d; };
       const closedD = parseD(c.closed_at);
       const closedStr = closedD ? closedD.toLocaleString("en-GB",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}) : "—";
-      slaFlags.push(c.sla_breached ? "B" : (c.status==="resolved"||c.status==="escalated") ? "M" : "");
+      slaFlags.push(c.sla_breached ? "B" : c.status==="resolved" ? "M" : "");
       const typeStr   = c.call_type ? c.call_type.charAt(0).toUpperCase()+c.call_type.slice(1) : "—";
       const priStr    = (c.priority??"").toUpperCase();
       const statStr   = (c.status??"").replace(/_/g," ").replace(/\w/g,(x:string)=>x.toUpperCase());
@@ -768,12 +758,12 @@ const ExportModal = ({onClose, engineers}:any) => {
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               <div>
                 <div style={{fontSize:12,fontWeight:600,color:"#4b5260",marginBottom:5}}>From</div>
-                <input type="date" value={customFrom} onChange={e=>setFrom(e.target.value)}
+                <DatePicker ariaLabel="From date" value={customFrom} onChange={setFrom}
                   style={{...sel}} className="calls-control"/>
               </div>
               <div>
                 <div style={{fontSize:12,fontWeight:600,color:"#4b5260",marginBottom:5}}>To</div>
-                <input type="date" value={customTo} onChange={e=>setTo(e.target.value)}
+                <DatePicker ariaLabel="To date" value={customTo} onChange={setTo}
                   style={{...sel}} className="calls-control"/>
               </div>
             </div>
@@ -855,7 +845,7 @@ const ExportModal = ({onClose, engineers}:any) => {
   );
 };
 
-export default function CallsModule({ atms, engineers, banks, initialFilter = "all" }: { atms: any[]; engineers: any[]; banks?: any[]; initialFilter?: string }) {
+export default function CallsModule({ atms, engineers, banks, initialFilter = "pending" }: { atms: any[]; engineers: any[]; banks?: any[]; initialFilter?: string }) {
   const [calls,setCalls]     = useState<Call[]>([]);
   const [showExport,setShowExport] = useState(false);
   const [loading,setLoading] = useState(true);
@@ -868,6 +858,9 @@ export default function CallsModule({ atms, engineers, banks, initialFilter = "a
   const [sortKey,setSortKey] = useState<string>("created_at");
   const [sortDir,setSortDir] = useState<"asc"|"desc">("desc");
   const [page,setPage]       = useState(1);
+  const [total,setTotal]     = useState(0);
+  const [totalPages,setTotalPages] = useState(1);
+  const [counts,setCounts] = useState<any>({});
   const PAGE_SIZE = 25;
 
   const toggleSort = (key:string) => {
@@ -881,49 +874,33 @@ export default function CallsModule({ atms, engineers, banks, initialFilter = "a
     return <span style={{marginLeft:4,color:C.primary}}>{sortDir==="asc"?"↑":"↓"}</span>;
   };
 
-  // Apply filter
-  const filtered = calls.filter(c => {
-    if (filter==="analytics") return true;
-    if (filter==="sla_breached") return c.sla_status==="breached"||Boolean(c.sla_breached);
-    if (filter==="closed")    return c.status==="resolved"||c.status==="escalated";
-    if (filter!=="all")       return c.status===filter;
-    return true;
-  });
-
-  // Apply sort
-  const sorted = [...filtered].sort((a:any,b:any) => {
-    let av:any, bv:any;
-    if (sortKey==="created_at"||sortKey==="assigned_at") {
-      av = a[sortKey] ? new Date(a[sortKey]).getTime() : 0;
-      bv = b[sortKey] ? new Date(b[sortKey]).getTime() : 0;
-    } else if (sortKey==="priority") {
-      const order:any={high:0,medium:1,low:2};
-      av = order[a.priority]??3; bv = order[b.priority]??3;
-    } else if (sortKey==="status") {
-      const order:any={escalated:0,pending:1,assigned:2,on_hold:3,resolved:4};
-      av = order[a.status]??5; bv = order[b.status]??5;
-    } else {
-      av = (a[sortKey]??"").toString().toLowerCase();
-      bv = (b[sortKey]??"").toString().toLowerCase();
-    }
-    if (av<bv) return sortDir==="asc"?-1:1;
-    if (av>bv) return sortDir==="asc"?1:-1;
-    return 0;
-  });
-
-  // Pagination
-  const totalPages = Math.ceil(sorted.length/PAGE_SIZE);
-  const paged      = sorted.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE);
+  const paged = calls;
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      setPage(1);
-      const res = await fetch(
-        `/calls?status=all&priority=${priority}`,
-        { headers:{ Accept:"application/json","X-Requested-With":"XMLHttpRequest" }, credentials:"same-origin" }
-      );
+      const params = new URLSearchParams({
+        status: filter === "analytics" ? "all" : filter,
+        priority,
+      });
+      if (filter !== "analytics") {
+        params.set("page", String(page));
+        params.set("per_page", String(PAGE_SIZE));
+        params.set("sort", sortKey);
+        params.set("direction", sortDir);
+      }
+
+      const [res, summaryRes] = await Promise.all([
+        fetch(`/calls?${params}`, {
+          headers:{ Accept:"application/json","X-Requested-With":"XMLHttpRequest" },
+          credentials:"same-origin",
+        }),
+        fetch(`/calls?summary=1&priority=${encodeURIComponent(priority)}`, {
+          headers:{ Accept:"application/json","X-Requested-With":"XMLHttpRequest" },
+          credentials:"same-origin",
+        }),
+      ]);
       if (!res.ok) {
         const text = await res.text();
         // Try to parse JSON error message
@@ -935,13 +912,29 @@ export default function CallsModule({ atms, engineers, banks, initialFilter = "a
         }
         return;
       }
+      if (!summaryRes.ok) {
+        throw new Error(`Failed to load call counts (${summaryRes.status}).`);
+      }
       const data = await res.json();
-      setCalls(Array.isArray(data) ? data : []);
+      const summary = await summaryRes.json();
+      if (Array.isArray(data)) {
+        setCalls(data);
+        setTotal(data.length);
+        setTotalPages(1);
+      } else {
+        setCalls(Array.isArray(data.data) ? data.data : []);
+        setTotal(data.total ?? 0);
+        const lastPage = data.last_page ?? 1;
+        setTotalPages(lastPage);
+        if (data.current_page > lastPage) setPage(lastPage);
+        else if (data.current_page && data.current_page !== page) setPage(data.current_page);
+      }
+      setCounts(summary);
     } catch(e:any) {
       setError(e.message || "Network error — could not load calls.");
     }
     finally { setLoading(false); }
-  }, [filter,priority]);
+  }, [filter,priority,page,sortKey,sortDir]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -956,17 +949,9 @@ export default function CallsModule({ atms, engineers, banks, initialFilter = "a
   };
 
   // Counts for filter tabs
-  const counts:any = {
-    all:      calls.length,
-    pending:  calls.filter(c=>c.status==="pending").length,
-    assigned: calls.filter(c=>c.status==="assigned").length,
-    on_hold:  calls.filter(c=>c.status==="on_hold").length,
-    closed:   calls.filter(c=>c.status==="resolved"||c.status==="escalated").length,
-    sla_breached: calls.filter(c=>c.sla_status==="breached"||c.sla_breached).length,
-  };
-
   const FILTER_TABS = [
     {id:"all",       label:"All"},
+    {id:"unresolved",label:"Unresolved"},
     {id:"pending",   label:"Pending"},
     {id:"assigned",  label:"Assigned"},
     {id:"on_hold",   label:"On Hold"},
@@ -988,7 +973,7 @@ export default function CallsModule({ atms, engineers, banks, initialFilter = "a
         </div>
         <div className="calls-page-actions">
           {/* Priority filter */}
-          <select className="calls-control calls-priority-filter" value={priority} onChange={e=>setPriority(e.target.value)} style={{
+          <select className="calls-control calls-priority-filter" value={priority} onChange={e=>{setPriority(e.target.value);setPage(1);}} style={{
             padding:"8px 12px",borderRadius:10,border:`1px solid ${C.border}`,
             fontSize:13,fontFamily:"inherit",color:C.textMid,background:C.surface,
             outline:"none",cursor:"pointer"}}>
@@ -1046,7 +1031,7 @@ export default function CallsModule({ atms, engineers, banks, initialFilter = "a
               </code>
             </div>
           </div>
-        ) : filtered.length===0 ? (
+        ) : calls.length===0 ? (
           <div style={{padding:"48px 24px",textAlign:"center",color:C.textMuted}}>
             <div style={{fontSize:36,marginBottom:10}}>📞</div>
             <div style={{fontSize:15}}>No calls {filter!=="all"?`with status "${filter}"`:"logged yet"}</div>
@@ -1158,11 +1143,11 @@ export default function CallsModule({ atms, engineers, banks, initialFilter = "a
         )}
 
         {/* Pagination */}
-        {filtered.length>0&&(
+        {total>0&&(
           <div style={{padding:"14px 20px",borderTop:`1px solid ${C.border}`,
             display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
             <div style={{fontSize:13,color:C.textMuted}}>
-              Showing <b style={{color:C.text}}>{Math.min((page-1)*PAGE_SIZE+1,sorted.length)}–{Math.min(page*PAGE_SIZE,sorted.length)}</b> of <b style={{color:C.text}}>{sorted.length}</b> calls
+              Showing <b style={{color:C.text}}>{Math.min((page-1)*PAGE_SIZE+1,total)}–{Math.min(page*PAGE_SIZE,total)}</b> of <b style={{color:C.text}}>{total}</b> calls
             </div>
             {totalPages>1&&(
               <div style={{display:"flex",gap:6,alignItems:"center"}}>

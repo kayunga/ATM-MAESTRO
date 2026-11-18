@@ -53,6 +53,34 @@ const TYPES    = ["Quarterly PM","Emergency","Part Replacement","Software Update
 const QUARTERS = ["1","2","3","4"];
 const now      = new Date();
 const currentQ = Math.ceil((now.getMonth()+1)/3);
+const PORTAL_PAGE_SIZE = 10;
+
+const PortalPaginator = ({page,total,pageSize=PORTAL_PAGE_SIZE,onPageChange}:any) => {
+  const totalPages=Math.ceil(total/pageSize);
+  if(totalPages<=1)return null;
+  const currentPage=Math.min(page,totalPages);
+  const from=(currentPage-1)*pageSize+1;
+  const to=Math.min(currentPage*pageSize,total);
+
+  return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,
+      flexWrap:"wrap",paddingTop:12,borderTop:`1px solid ${C.border}`}}>
+      <span style={{fontSize:12,color:C.textMuted}}>Showing <b style={{color:C.text}}>{from}–{to}</b> of <b style={{color:C.text}}>{total}</b></span>
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={()=>onPageChange(Math.max(1,currentPage-1))} disabled={currentPage===1}
+          style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 12px",
+            color:currentPage===1?C.textMuted:C.text,cursor:currentPage===1?"not-allowed":"pointer"}}>
+          Previous
+        </button>
+        <button onClick={()=>onPageChange(Math.min(totalPages,currentPage+1))} disabled={currentPage===totalPages}
+          style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 12px",
+            color:currentPage===totalPages?C.textMuted:C.text,cursor:currentPage===totalPages?"not-allowed":"pointer"}}>
+          Next
+        </button>
+      </div>
+    </div>
+  );
+};
 
 // ─── Responsive hook ─────────────────────────────────────────────────────────
 function useIsMobile() {
@@ -776,10 +804,15 @@ const HomeTab = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear}:a
 // ─── Tab: PM Schedule ─────────────────────────────────────────────────────────
 const PMTab = ({pmRecords,currentQuarter,currentYear,onLogJobCard}:any) => {
   const [filter,setFilter] = useState("all");
+  const [page,setPage] = useState(1);
   const filtered = filter==="all" ? pmRecords
     : filter==="done"    ? pmRecords.filter((p:PMRecord)=>p.status==="Completed")
     : filter==="pending" ? pmRecords.filter((p:PMRecord)=>p.status!=="Completed"&&!p.job_card_id)
     : pmRecords.filter((p:PMRecord)=>p.status!=="Completed"&&new Date(p.scheduled_date)<now);
+  const totalPages=Math.max(1,Math.ceil(filtered.length/PORTAL_PAGE_SIZE));
+  const currentPage=Math.min(page,totalPages);
+  const paged=filtered.slice((currentPage-1)*PORTAL_PAGE_SIZE,currentPage*PORTAL_PAGE_SIZE);
+  useEffect(()=>setPage(1),[filter,filtered.length]);
 
   return (
     <div style={{padding:"16px 16px 24px"}}>
@@ -818,7 +851,7 @@ const PMTab = ({pmRecords,currentQuarter,currentYear,onLogJobCard}:any) => {
         </div>
       ):(
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {filtered.map((pm:PMRecord)=>{
+          {paged.map((pm:PMRecord)=>{
             const isOverdue = pm.status!=="Completed"&&new Date(pm.scheduled_date)<now;
             return (
               <div key={pm.id} style={{...card,padding:14,
@@ -865,6 +898,7 @@ const PMTab = ({pmRecords,currentQuarter,currentYear,onLogJobCard}:any) => {
           })}
         </div>
       )}
+      <PortalPaginator page={currentPage} total={filtered.length} onPageChange={setPage}/>
     </div>
   );
 };
@@ -880,7 +914,12 @@ const LogTab = ({atms,onSave,initialAtmId}:any) => (
 // ─── Tab: My Job Cards ────────────────────────────────────────────────────────
 const CardsTab = ({jobCards,onView}:any) => {
   const [filter,setFilter] = useState("all");
+  const [page,setPage] = useState(1);
   const filtered = filter==="all"?jobCards:jobCards.filter((c:JobCard)=>c.status===filter);
+  const totalPages=Math.max(1,Math.ceil(filtered.length/PORTAL_PAGE_SIZE));
+  const currentPage=Math.min(page,totalPages);
+  const paged=filtered.slice((currentPage-1)*PORTAL_PAGE_SIZE,currentPage*PORTAL_PAGE_SIZE);
+  useEffect(()=>setPage(1),[filter,filtered.length]);
 
   return (
     <div style={{padding:"16px 16px 24px"}}>
@@ -913,7 +952,7 @@ const CardsTab = ({jobCards,onView}:any) => {
         </div>
       ):(
         <div className="engineer-jobcards-list" style={{display:"flex",flexDirection:"column",gap:10}}>
-          {filtered.map((jobCard:JobCard)=>(
+          {paged.map((jobCard:JobCard)=>(
             <div key={jobCard.id} onClick={()=>onView(jobCard)}
               className="engineer-jobcard-list-card"
               style={{...card,padding:14,cursor:"pointer",
@@ -952,6 +991,7 @@ const CardsTab = ({jobCards,onView}:any) => {
           ))}
         </div>
       )}
+      <PortalPaginator page={currentPage} total={filtered.length} onPageChange={setPage}/>
     </div>
   );
 };
@@ -1368,6 +1408,11 @@ const CallsTab = ({atms, engineer, addToast, onCallAssignmentHandled}:any) => {
   const filtered = filter==="mine"
     ? calls.filter(c=>c.is_mine&&!isClosed(c.status))
     : calls.filter(c=>!isClosed(c.status));
+  const [page,setPage] = useState(1);
+  const totalPages=Math.max(1,Math.ceil(filtered.length/PORTAL_PAGE_SIZE));
+  const currentPage=Math.min(page,totalPages);
+  const pagedCalls=filtered.slice((currentPage-1)*PORTAL_PAGE_SIZE,currentPage*PORTAL_PAGE_SIZE);
+  useEffect(()=>setPage(1),[filter,filtered.length]);
 
   const [bannerDismissed,setBannerDismissed] = useState(false);
   const mineCount = calls.filter(c=>c.is_mine&&!isClosed(c.status)).length;
@@ -1432,7 +1477,7 @@ const CallsTab = ({atms, engineer, addToast, onCallAssignmentHandled}:any) => {
         </div>
       ) : (
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {filtered.map((call:any)=>(
+          {pagedCalls.map((call:any)=>(
             <div key={call.id} style={{...card,padding:14,
               borderLeft:`4px solid ${CALL_PRIORITY[call.priority].color}`,
               cursor:"pointer"}}
@@ -1529,6 +1574,7 @@ const CallsTab = ({atms, engineer, addToast, onCallAssignmentHandled}:any) => {
           ))}
         </div>
       )}
+      <PortalPaginator page={currentPage} total={filtered.length} onPageChange={setPage}/>
 
       {/* Detail Modal */}
       {modal==="detail"&&selected&&(
@@ -1610,7 +1656,7 @@ const LoginScreen = ({errors}:any) => {
           <div style={{width:64,height:64,borderRadius:18,background:C.primary,
             display:"flex",alignItems:"center",justifyContent:"center",
             fontSize:28,margin:"0 auto 14px"}}>🏧</div>
-          <div style={{fontSize:22,fontWeight:800,color:C.text}}>NCR Engineer</div>
+          <div style={{fontSize:22,fontWeight:800,color:C.text}}>ATM Maestro</div>
           <div style={{fontSize:13,color:C.textMuted,marginTop:4}}>Field Service Portal</div>
         </div>
 
@@ -1639,7 +1685,7 @@ const LoginScreen = ({errors}:any) => {
           </button>
         </form>
         <p style={{textAlign:"center",fontSize:12,color:C.textMuted,marginTop:20,marginBottom:0}}>
-          NCR Fleet · Techmasters Zambia
+          ATM Maestro · Techmasters Zambia
         </p>
       </div>
     </div>
@@ -1816,7 +1862,7 @@ const Dashboard = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear,
               <div style={{width:32,height:32,borderRadius:8,background:C.primary,
                 display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🏧</div>
               <div>
-                <div style={{fontSize:14,fontWeight:800,color:C.text,lineHeight:1.1}}>NCR Engineer Portal</div>
+                <div style={{fontSize:14,fontWeight:800,color:C.text,lineHeight:1.1}}>ATM Maestro Portal</div>
                 <div style={{fontSize:10,color:C.textMuted,letterSpacing:"0.05em"}}>FIELD SERVICE</div>
               </div>
             </div>
@@ -1908,7 +1954,7 @@ const Dashboard = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear,
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <div style={{width:28,height:28,borderRadius:7,background:C.primary,
               display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🏧</div>
-            <span style={{fontSize:14,fontWeight:800,color:C.text}}>NCR Engineer</span>
+            <span style={{fontSize:14,fontWeight:800,color:C.text}}>ATM Maestro</span>
           </div>
           {/* Avatar — opens profile dropdown */}
           <div style={{position:"relative"}}>
@@ -1974,7 +2020,7 @@ const Dashboard = ({engineer,atms,jobCards,pmRecords,currentQuarter,currentYear,
                   <div style={{width:36,height:36,borderRadius:9,background:C.primary,
                     display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🏧</div>
                   <div>
-                    <div style={{fontSize:14,fontWeight:800,color:C.text}}>NCR Engineer</div>
+                    <div style={{fontSize:14,fontWeight:800,color:C.text}}>ATM Maestro</div>
                     <div style={{fontSize:10,color:C.textMuted,letterSpacing:"0.06em",textTransform:"uppercase"}}>Field Service</div>
                   </div>
                 </div>

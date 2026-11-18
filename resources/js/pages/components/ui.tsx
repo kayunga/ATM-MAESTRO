@@ -1,4 +1,6 @@
-import { C, PAGE_SIZE } from "../constants";
+import { CalendarDays } from "lucide-react";
+import { useId, useRef } from "react";
+import { C } from "../constants";
 import type { BtnVariant } from "../types";
 
 // ─── Badge ────────────────────────────────────────────────────────────────────
@@ -32,22 +34,74 @@ interface InputProps {
   placeholder?: string; type?: string; required?: boolean;
   options?: (string | SelectOption)[]; rows?: number;
 }
-export const Input = ({ label, value, onChange, placeholder, type = "text", required, options, rows }: InputProps) => (
-  <div className="field-wrap">
-    {label && <label className="field-label">{label}{required && <span className="field-required"> *</span>}</label>}
-    {options ? (
-      <select value={value} onChange={e => onChange(e.target.value)} className="field-control field-select">
-        <option value="">— Select —</option>
-        {options.map(o => { const val = typeof o === "object" ? o.value : o; const lbl = typeof o === "object" ? o.label : o; return <option key={val} value={val}>{lbl}</option>; })}
-      </select>
-    ) : rows ? (
-      <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} rows={rows} className="field-control field-textarea"/>
-    ) : (
-      <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} required={required} className="field-control"
-        style={type==="date"?{colorScheme:"light",cursor:"pointer"}:undefined}/>
-    )}
-  </div>
-);
+interface DatePickerProps {
+  value: string;
+  onChange: (value: string) => void;
+  id?: string;
+  ariaLabel?: string;
+  className?: string;
+  style?: React.CSSProperties;
+  min?: string;
+  max?: string;
+  required?: boolean;
+}
+
+export const DatePicker = ({ value, onChange, id, ariaLabel = "Choose date", className = "", style, min, max, required }: DatePickerProps) => {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const openCalendar = () => {
+    const input = inputRef.current;
+    if (!input) return;
+    if (input.showPicker) input.showPicker();
+    else {
+      input.focus();
+      input.click();
+    }
+  };
+
+  return (
+    <div className="date-picker">
+      <input
+        ref={inputRef}
+        id={id}
+        aria-label={ariaLabel}
+        type="date"
+        value={value}
+        min={min}
+        max={max}
+        required={required}
+        onChange={event => onChange(event.target.value)}
+        className={`date-picker__input ${className}`}
+        style={style}
+      />
+      <button type="button" className="date-picker__button" onClick={openCalendar} aria-label={ariaLabel}>
+        <CalendarDays size={16} aria-hidden="true" />
+      </button>
+    </div>
+  );
+};
+
+export const Input = ({ label, value, onChange, placeholder, type = "text", required, options, rows }: InputProps) => {
+  const inputId = useId();
+
+  return (
+    <div className="field-wrap">
+      {label && <label htmlFor={inputId} className="field-label">{label}{required && <span className="field-required"> *</span>}</label>}
+      {options ? (
+        <select id={inputId} value={value} onChange={e => onChange(e.target.value)} className="field-control field-select">
+          <option value="">— Select —</option>
+          {options.map(o => { const val = typeof o === "object" ? o.value : o; const lbl = typeof o === "object" ? o.label : o; return <option key={val} value={val}>{lbl}</option>; })}
+        </select>
+      ) : rows ? (
+        <textarea id={inputId} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} rows={rows} className="field-control field-textarea"/>
+      ) : type === "date" ? (
+        <DatePicker id={inputId} value={String(value)} onChange={onChange} required={required} className="field-control"/>
+      ) : (
+        <input id={inputId} type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} required={required} className="field-control"/>
+      )}
+    </div>
+  );
+};
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 interface ModalProps { title: string; subtitle?: string; onClose: () => void; children: React.ReactNode; width?: number; }

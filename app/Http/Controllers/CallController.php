@@ -13,24 +13,31 @@ class CallController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $status   = $request->query('status', 'all');
+        $status   = $request->query('status', 'pending');
         $priority = $request->query('priority', 'all');
 
-        // Update sla_breached flag for all open calls before returning
+        // Update SLA and call type state before returning any call data.
         Call::whereNotIn('status', ['resolved'])
             ->whereNotNull('sla_breach_at')
             ->where('sla_breached', false)
             ->where('sla_breach_at', '<', now())
             ->update(['sla_breached' => true]);
 
-        // Auto-age: calls logged on a previous calendar date become call_type = "old"
         Call::whereNotIn('status', ['resolved'])
             ->where('call_type', 'new')
             ->whereDate('created_at', '<', now()->toDateString())
             ->update(['call_type' => 'old']);
 
         if ($request->boolean('summary')) {
-            $slaBreached = Call::query()
+            $summaryQuery = Call::query()
+                ->when($priority !== 'all', fn ($query) => $query->where('priority', $priority));
+
+            $countsByStatus = (clone $summaryQuery)
+                ->selectRaw('status, COUNT(*) as aggregate')
+                ->groupBy('status')
+                ->pluck('aggregate', 'status');
+
+            $slaBreached = (clone $summaryQuery)
                 ->whereNotNull('sla_breach_at')
                 ->where(function ($query) {
                     $query->where(function ($openCalls) {
@@ -44,7 +51,12 @@ class CallController extends Controller
                 ->count();
 
             return response()->json([
-                'pending' => Call::query()->where('status', 'pending')->count(),
+                'all' => (int) $countsByStatus->sum(),
+                'pending' => (int) $countsByStatus->get('pending', 0),
+                'assigned' => (int) $countsByStatus->get('assigned', 0),
+                'on_hold' => (int) $countsByStatus->get('on_hold', 0),
+                'closed' => (int) $countsByStatus->get('resolved', 0),
+                'unresolved' => (int) $summaryQuery->where('status', '!=', 'resolved')->count(),
                 'sla_breached' => $slaBreached,
             ]);
         }
@@ -53,16 +65,80 @@ class CallController extends Controller
         $dateTo    = $request->query('date_to');
         $type      = $request->query('call_type', 'all');
         $engineerId= $request->query('engineer_id');
+        $perPage = $request->has('per_page')
+            ? $request->validate(['per_page' => ['required', 'integer', 'between:1,100']])['per_page']
+            : null;
 
-        $calls = Call::query()
-            ->when($status === 'closed',  fn($q) => $q->whereIn('status', ['resolved','escalated']))
-            ->when($status !== 'all' && $status !== 'closed', fn($q) => $q->where('status', $status))
+        $query = Call::query()
+            ->when($status === 'closed',  fn($q) => $q->where('status', 'resolved'))
+            ->when(!in_array($status, ['all', 'closed', 'unresolved', 'sla_breached'], true), fn($q) => $q->where('status', $status))
+            ->when($status === 'unresolved', fn ($q) => $q->where('status', '!=', 'resolved'))
+            ->when($status === 'sla_breached', function ($q) {
+                $q->whereNotNull('sla_breach_at')
+                    ->where(function ($breached) {
+                        $breached->where(function ($openCalls) {
+                            $openCalls->where('status', '!=', 'resolved')
+                                ->where('sla_breach_at', '<', now());
+                        })->orWhere(function ($resolvedCalls) {
+                            $resolvedCalls->where('status', 'resolved')
+                                ->whereRaw('COALESCE(resolved_at, closed_at) > sla_breach_at');
+                        });
+                    });
+            })
             ->when($priority   !== 'all', fn($q) => $q->where('priority',  $priority))
             ->when($type       !== 'all', fn($q) => $q->where('call_type', $type))
-            ->when($dateFrom,             fn($q) => $q->whereDate('created_at', '>=', $dateFrom))
-            ->when($dateTo,               fn($q) => $q->whereDate('created_at', '<=', $dateTo))
+            ->when($dateFrom || $dateTo, function ($query) use ($dateFrom, $dateTo) {
+                $query->where(function ($dateRange) use ($dateFrom, $dateTo) {
+                    $dateRange->where(function ($createdDuringRange) use ($dateFrom, $dateTo) {
+                        $createdDuringRange
+                            ->when($dateFrom, fn($q) => $q->whereDate('created_at', '>=', $dateFrom))
+                            ->when($dateTo, fn($q) => $q->whereDate('created_at', '<=', $dateTo));
+                    })->orWhere('status', '!=', 'resolved');
+                });
+            })
             ->when($engineerId,           fn($q) => $q->where('assigned_engineer_id', $engineerId))
-            ->with(['atm.bank', 'engineer', 'assignedBy', 'jobCards'])
+            ->with(['atm.bank', 'engineer', 'assignedBy'])
+            ->withCount('jobCards');
+
+        if ($perPage !== null) {
+            $sortColumns = [
+                'created_at' => 'created_at',
+                'assigned_at' => 'assigned_at',
+                'call_type' => 'call_type',
+                'priority' => 'priority',
+                'status' => 'status',
+                'atm' => 'atm_id',
+                'engineer' => 'assigned_engineer_id',
+            ];
+            $validatedSort = $request->validate([
+                'sort' => ['sometimes', 'in:created_at,assigned_at,call_type,priority,status,atm,engineer'],
+                'direction' => ['sometimes', 'in:asc,desc'],
+            ]);
+
+            $sortDirection = $validatedSort['direction'] ?? 'desc';
+            if (($validatedSort['sort'] ?? null) === 'priority') {
+                $query->orderByRaw("CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END {$sortDirection}");
+            } elseif (($validatedSort['sort'] ?? null) === 'status') {
+                $query->orderByRaw("CASE status WHEN 'escalated' THEN 1 WHEN 'pending' THEN 2 WHEN 'assigned' THEN 3 WHEN 'on_hold' THEN 4 WHEN 'resolved' THEN 5 ELSE 6 END {$sortDirection}");
+            } elseif (($validatedSort['sort'] ?? null) === 'atm') {
+                $query->orderByRaw("(SELECT terminal_id FROM atms WHERE atms.id = calls.atm_id) {$sortDirection}");
+            } elseif (($validatedSort['sort'] ?? null) === 'engineer') {
+                $query->orderByRaw("(SELECT name FROM engineers WHERE engineers.id = calls.assigned_engineer_id) {$sortDirection}");
+            } elseif (isset($validatedSort['sort'])) {
+                $query->orderBy($sortColumns[$validatedSort['sort']], $sortDirection);
+            } else {
+                $query
+                    ->orderByRaw("CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END")
+                    ->orderByRaw("CASE status WHEN 'escalated' THEN 1 WHEN 'pending' THEN 2 WHEN 'assigned' THEN 3 WHEN 'on_hold' THEN 4 WHEN 'resolved' THEN 5 ELSE 6 END")
+                    ->orderByDesc('created_at');
+            }
+
+            return response()->json(
+                $query->orderByDesc('id')->paginate($perPage)->through(fn ($call) => $this->format($call))
+            );
+        }
+
+        $calls = $query
             ->orderByRaw("CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END")
             ->orderByRaw("CASE status WHEN 'escalated' THEN 1 WHEN 'pending' THEN 2 WHEN 'assigned' THEN 3 WHEN 'on_hold' THEN 4 WHEN 'resolved' THEN 5 ELSE 6 END")
             ->orderByDesc('created_at')
@@ -209,7 +285,7 @@ class CallController extends Controller
             'sla_status'        => $slaStatus,   // 'active' | 'breached' | 'met' | 'none'
             'sla_minutes'       => $slaMinutes,  // negative = past breach
             'sla_hours_allowed' => self::SLA_HOURS[$call->priority] ?? 3,
-            'job_cards_count'   => $call->jobCards->count(),
+            'job_cards_count'   => $call->job_cards_count ?? $call->jobCards->count(),
             'atm' => [
                 'id'          => $call->atm->id,
                 'terminal_id' => $call->atm->terminal_id,

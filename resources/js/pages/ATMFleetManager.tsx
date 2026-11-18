@@ -831,7 +831,7 @@ const EngForm = ({initial,onSave,onClose}) => {
 };
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
-const Dashboard = ({atms,maintenance,approvedPmCards,engineers,banks,pendingCalls,slaBreachedCalls,onNavigate,onBulkPM,toast}) => {
+const Dashboard = ({atms,maintenance,approvedPmCards,engineers,banks,pendingCalls,unresolvedCalls,slaBreachedCalls,onNavigate,onBulkPM,toast}) => {
   const currentQuarter=qtr(today),currentYear=today.getFullYear();
   const [selectedQuarter,setSelectedQuarter]=useState(currentQuarter);
   const [selectedYear,setSelectedYear]=useState(currentYear);
@@ -867,6 +867,9 @@ const Dashboard = ({atms,maintenance,approvedPmCards,engineers,banks,pendingCall
       <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
         <button type="button" className="dashboard-stat-link" onClick={()=>onNavigate("calls","pending")} aria-label="View pending calls">
           <StatCard label="Pending Calls" value={pendingCalls} sub="awaiting assignment" color={C.amber} icon="📞"/>
+        </button>
+        <button type="button" className="dashboard-stat-link" onClick={()=>onNavigate("calls","unresolved")} aria-label="View unresolved calls">
+          <StatCard label="Unresolved Calls" value={unresolvedCalls} sub="not yet resolved" color={unresolvedCalls?C.red:C.green} icon="📋"/>
         </button>
         <button type="button" className="dashboard-stat-link" onClick={()=>onNavigate("calls","sla_breached")} aria-label="View SLA-breached calls">
           <StatCard label="SLA Breached" value={slaBreachedCalls} sub="missed response target" color={slaBreachedCalls?C.red:C.green} icon="⏱️"/>
@@ -1166,7 +1169,7 @@ const MaintenanceModule = ({maintenance,atms,engineers,banks,onAdd,onEdit,onDele
       <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
         {[["Scheduled",C.amber,C.amberLight],["In Progress",C.accent,C.accentLight],["Completed",C.green,C.greenLight],["Cancelled",C.textMuted,C.surface]].map(([s,c,bg])=>(
           <div key={s} style={{background:bg,border:`1px solid ${c}22`,borderRadius:10,padding:"12px 20px",display:"flex",gap:10,alignItems:"center"}}>
-            <span style={{fontSize:22,fontWeight:800,color:c}}>{maintenance.filter(m=>m.status===s).length}</span>
+            <span style={{fontSize:22,fontWeight:800,color:c}}>{filtered.filter(m=>m.status===s).length}</span>
             <span style={{fontSize:13,fontWeight:600,color:c}}>{s}</span>
           </div>
         ))}
@@ -1347,6 +1350,7 @@ export default function App(props: PageProps) {
   const [modal,setModal]         = useState(null);
   const [bulkModal,setBulkModal] = useState(null);
   const [pendingCalls,setPendingCalls] = useState(0);
+  const [unresolvedCalls,setUnresolvedCalls] = useState(0);
   const [slaBreachedCalls,setSlaBreachedCalls] = useState(0);
 
   // Refresh dashboard call KPIs every 60 seconds.
@@ -1360,6 +1364,7 @@ export default function App(props: PageProps) {
         if (!res.ok) throw new Error(`Failed to load call summary (${res.status})`);
         const summary = await res.json();
         setPendingCalls(Number(summary.pending)||0);
+        setUnresolvedCalls(Number(summary.unresolved)||0);
         setSlaBreachedCalls(Number(summary.sla_breached)||0);
       } catch (error) {
         console.error("Unable to refresh admin call summary", error);
@@ -1519,7 +1524,7 @@ export default function App(props: PageProps) {
         <div className="desktop-nav__inner">
           <div className="nav-logo">
             <div className="nav-logo__icon" style={{background:C.accent}}>🏧</div>
-            <div><div className="nav-logo__name" style={{color:C.text}}>NCR Fleet</div><div className="nav-logo__sub" style={{color:C.textMuted}}>ATM MANAGER</div></div>
+            <div><div className="nav-logo__name" style={{color:C.text}}>ATM Maestro</div><div className="nav-logo__sub" style={{color:C.textMuted}}>ATM MANAGEMENT</div></div>
           </div>
           <div className="nav-links">
             {navItemsMain.map(n=>(
@@ -1590,7 +1595,7 @@ export default function App(props: PageProps) {
         </button>
         <div className="mobile-topbar__logo">
           <div className="mobile-topbar__icon" style={{background:C.accent}}>🏧</div>
-          <div className="mobile-topbar__title" style={{color:C.text}}>NCR Fleet</div>
+          <div className="mobile-topbar__title" style={{color:C.text}}>ATM Maestro</div>
         </div>
         <AdminNotifications items={attentionItems} onNavigate={navigate}/>
       </div>
@@ -1601,7 +1606,7 @@ export default function App(props: PageProps) {
         <div className="drawer-header" style={{background:C.navBg}}>
           <div className="drawer-logo">
             <div className="drawer-logo__icon" style={{background:C.accent}}>🏧</div>
-            <div><div className="drawer-logo__name" style={{color:C.text}}>NCR Fleet</div><div className="drawer-logo__sub" style={{color:C.textMuted}}>ATM Manager</div></div>
+            <div><div className="drawer-logo__name" style={{color:C.text}}>ATM Maestro</div><div className="drawer-logo__sub" style={{color:C.textMuted}}>ATM Management</div></div>
           </div>
           <button onClick={()=>setDrawerOpen(false)} className="drawer-close" style={{color:C.textMuted}}>×</button>
         </div>
@@ -1631,13 +1636,13 @@ export default function App(props: PageProps) {
           <button onClick={handleLogout} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"9px 14px",borderRadius:10,border:`1px solid ${C.border}`,background:"#fff",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:C.danger}}>
             🚪 Sign Out
           </button>
-          <div style={{fontSize:11,color:C.textMuted,textAlign:"center",marginTop:10}}>NCR Fleet · Techmasters Zambia</div>
+          <div style={{fontSize:11,color:C.textMuted,textAlign:"center",marginTop:10}}>ATM Maestro · Techmasters Zambia</div>
         </div>
       </div>
 
       {/* ── MAIN CONTENT ── */}
       <main className="main-content">
-        {page==="dashboard"   &&<Dashboard   atms={atms} maintenance={maintenance} approvedPmCards={rawApprovedPmCards||[]} engineers={engineers} banks={banks} pendingCalls={pendingCalls} slaBreachedCalls={slaBreachedCalls} onNavigate={navigate} onBulkPM={()=>setBulkModal({type:"bulkPM",atms:[]})} toast={toast}/>}
+        {page==="dashboard"   &&<Dashboard   atms={atms} maintenance={maintenance} approvedPmCards={rawApprovedPmCards||[]} engineers={engineers} banks={banks} pendingCalls={pendingCalls} unresolvedCalls={unresolvedCalls} slaBreachedCalls={slaBreachedCalls} onNavigate={navigate} onBulkPM={()=>setBulkModal({type:"bulkPM",atms:[]})} toast={toast}/>}
         {page==="banks"       &&<BanksModule banks={banks} atms={atms} onAdd={()=>setModal({type:"bank"})} onEdit={b=>setModal({type:"bank",data:b})} onDelete={deleteBank}/>}
         {page==="atms"        &&<AtmList     atms={atms} engineers={engineers} banks={banks} maintenance={maintenance} initialFilter={sectionFocus?.page==="atms"?sectionFocus.filter:""}
             onAdd={()=>setModal({type:"atm"})} onEdit={a=>setModal({type:"atm",data:a})} onDelete={deleteAtm} onView={setViewAtm}
@@ -1653,7 +1658,7 @@ export default function App(props: PageProps) {
             onExport={handleExportPDF}/>}
         {page==="engineers"   &&<EngineersModule   engineers={engineers} atms={atms} banks={banks} onAdd={()=>setModal({type:"eng"})} onEdit={e=>setModal({type:"eng",data:e})} onDelete={deleteEng}/>}
         {page==="jobcards"    &&<JobCardsModule    atms={atms} engineers={engineers} banks={banks} onApproved={()=>router.reload({only:["maintenance","approvedPmCards"]})}/>}
-        {page==="calls"       &&<CallsModule       atms={rawAtms||[]} engineers={engineers} banks={banks} initialFilter={sectionFocus?.page==="calls"?sectionFocus.filter:"all"}/>}
+        {page==="calls"       &&<CallsModule       atms={rawAtms||[]} engineers={engineers} banks={banks} initialFilter={sectionFocus?.page==="calls"?sectionFocus.filter:"pending"}/>}
       </main>
 
       {/* ── MOBILE BOTTOM NAV ── */}

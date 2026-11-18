@@ -4,8 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\JobCard;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
-use ZipArchive;
 
 class JobCardDownloadController extends Controller
 {
@@ -63,63 +61,4 @@ class JobCardDownloadController extends Controller
         ]);
     }
 
-    /**
-     * Bulk download — multiple job cards as one ZIP, organised by bank/ATM.
-     * POST /job-cards/bulk-download
-     */
-    public function bulk(Request $request)
-    {
-        $request->validate([
-            'ids'   => ['required', 'array'],
-            'ids.*' => ['integer', 'exists:job_cards,id'],
-        ]);
-
-        $cards = JobCard::whereIn('id', $request->ids)
-            ->with('atm.bank', 'engineer')
-            ->get();
-
-        $filename = 'jobcards-' . now()->format('Y-m-d') . '.zip';
-        $tmpPath  = storage_path("app/tmp/{$filename}");
-
-        if (!is_dir(storage_path('app/tmp'))) {
-            mkdir(storage_path('app/tmp'), 0755, true);
-        }
-
-        $zip = new ZipArchive();
-
-        if ($zip->open($tmpPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-            abort(500, 'Failed to create ZIP archive.');
-        }
-
-        $hasFiles = false;
-
-        foreach ($cards as $card) {
-            $attachments = $card->attachments ?? [];
-            if (empty($attachments)) continue;
-
-            // Folder: BankCode / TerminalID-TYPE /
-            $type   = str_replace([' ','/','\\'], '-', $card->type ?? 'PM');
-            $folder = "{$card->atm->bank->short_code}/{$card->atm->terminal_id}-{$type}";
-
-            foreach ($attachments as $file) {
-                $ext      = pathinfo($file['name'], PATHINFO_EXTENSION);
-                $date     = $card->submitted_at?->format('d-m-Y') ?? now()->format('d-m-Y');
-                $name     = "{$card->atm->terminal_id}-{$card->atm->bank->short_code}-{$type}-{$date}.{$ext}";
-                $path = storage_path("app/public/{$file['path']}");
-                if (file_exists($path)) {
-                    $zip->addFile($path, "{$folder}/{$name}");
-                    $hasFiles = true;
-                }
-            }
-        }
-
-        $zip->close();
-
-        if (!$hasFiles) {
-            unlink($tmpPath);
-            return back()->with('error', 'None of the selected job cards have attachments.');
-        }
-
-        return response()->download($tmpPath, $filename)->deleteFileAfterSend(true);
-    }
 }

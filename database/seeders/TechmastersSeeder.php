@@ -12,6 +12,8 @@ class TechmastersSeeder extends Seeder
     public function run(): void
     {
         \Illuminate\Support\Facades\Schema::disableForeignKeyConstraints();
+        DB::table('job_cards')->truncate();
+        DB::table('calls')->truncate();
         DB::table('maintenance_records')->truncate();
         DB::table('atms')->truncate();
         DB::table('engineers')->truncate();
@@ -9003,5 +9005,99 @@ class TechmastersSeeder extends Seeder
                 'updated_at'     => $now,
             ],
         ]);
+
+        // ── Calls Analytics Stress-Test Data (May–September 2026) ────────────
+        $engineerIds = $engineers->values()->all();
+        $atmIds = $atms->values()->all();
+        $faults = [
+            'Cash dispenser jam reported by customer',
+            'ATM is offline and not responding to remote monitoring',
+            'Card reader intermittently rejects valid cards',
+            'Receipt printer is not dispensing receipts',
+            'Cash retraction unit fault after transaction timeout',
+            'Screen is blank while the ATM remains powered',
+            'Cash count mismatch reported during reconciliation',
+            'Network connection drops intermittently',
+        ];
+        $resolutionNotes = [
+            'Replaced the faulty module and completed transaction tests.',
+            'Restored connectivity and confirmed successful host transactions.',
+            'Cleaned and recalibrated the card reader; test cards passed.',
+            'Cleared the jam, replenished consumables and verified operation.',
+            'Replaced the affected component and returned the ATM to service.',
+        ];
+        $callRows = [];
+        $slaHours = ['high' => 2, 'medium' => 3, 'low' => 5];
+        $months = [5, 6, 7, 8, 9];
+
+        foreach ($months as $monthIndex => $month) {
+            $daysInMonth = Carbon::create(2026, $month, 1)->daysInMonth;
+
+            for ($i = 0; $i < 200; $i++) {
+                $statusIndex = ($i + $monthIndex * 3) % 20;
+                $status = match (true) {
+                    $statusIndex <= 10 => 'resolved',
+                    $statusIndex <= 14 => 'pending',
+                    $statusIndex <= 16 => 'assigned',
+                    $statusIndex === 17 => 'on_hold',
+                    default => 'escalated',
+                };
+                $priority = ['high', 'medium', 'low'][($i + $monthIndex) % 3];
+                $day = 1 + (($i * 13 + $month * 7) % $daysInMonth);
+                $createdAt = Carbon::create(
+                    2026,
+                    $month,
+                    $day,
+                    7 + ($i % 12),
+                    ($i * 7) % 60,
+                );
+                $engineerId = $status === 'pending'
+                    ? null
+                    : $engineerIds[($i + $monthIndex) % count($engineerIds)];
+                $atmIndex = $status === 'pending'
+                    ? $i % min(8, count($atmIds))
+                    : ($i * 7 + $monthIndex) % count($atmIds);
+                $assignedAt = $engineerId ? $createdAt->copy()->addMinutes(15 + ($i % 180)) : null;
+                $resolvedAt = $status === 'resolved'
+                    ? $createdAt->copy()->addHours([1, 2, 4, 6, 9, 14, 28][($i + $monthIndex) % 7])
+                    : null;
+                $slaBreachAt = $createdAt->copy()->addHours($slaHours[$priority]);
+                $escalatedAt = $status === 'escalated'
+                    ? $createdAt->copy()->addHours(1 + ($i % 8))
+                    : null;
+
+                $callRows[] = [
+                    'atm_id' => $atmIds[$atmIndex],
+                    'assigned_engineer_id' => $engineerId,
+                    'assigned_by' => null,
+                    'call_type' => ['new', 'old', 'repeat'][($i + $monthIndex) % 3],
+                    'status' => $status,
+                    'priority' => $priority,
+                    'fault_description' => $faults[($i + $monthIndex) % count($faults)],
+                    'notes' => $status === 'pending'
+                        ? 'Awaiting engineer assignment or required spare parts.'
+                        : null,
+                    'resolution_notes' => $resolvedAt
+                        ? $resolutionNotes[($i + $monthIndex) % count($resolutionNotes)]
+                        : null,
+                    'assigned_at' => $assignedAt?->toDateTimeString(),
+                    'resolved_at' => $resolvedAt?->toDateTimeString(),
+                    'escalated_at' => $escalatedAt?->toDateTimeString(),
+                    'sla_breach_at' => $slaBreachAt->toDateTimeString(),
+                    'sla_breached' => $resolvedAt
+                        ? $resolvedAt->greaterThan($slaBreachAt)
+                        : $slaBreachAt->lessThan($now),
+                    'closed_at' => $resolvedAt?->toDateTimeString(),
+                    'created_at' => $createdAt->toDateTimeString(),
+                    'updated_at' => ($resolvedAt ?? $createdAt)->toDateTimeString(),
+                ];
+            }
+        }
+
+        foreach (array_chunk($callRows, 500) as $callChunk) {
+            DB::table('calls')->insert($callChunk);
+        }
+
+        $this->command->info('✓ Seeded 1,000 calls from May to September 2026.');
     }
 }

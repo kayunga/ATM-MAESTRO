@@ -76,6 +76,24 @@ interface JobCardResponse {
   counts: Record<JobCardFilter, number>;
 }
 
+interface JobCardPdfDocument {
+  addPage(): void;
+  addImage(imageData: string, format: string, x: number, y: number, width: number, height: number, alias?: string, compression?: string): void;
+  save(filename: string): void;
+}
+
+declare global {
+  interface Window {
+    jspdf?: {
+      jsPDF: new (options: { orientation: "portrait"; unit: "mm"; format: "a4"; compress: boolean }) => JobCardPdfDocument;
+    };
+    html2canvas?: (
+      element: HTMLElement,
+      options: { scale: number; backgroundColor: string; useCORS: boolean; windowWidth: number },
+    ) => Promise<HTMLCanvasElement>;
+  }
+}
+
 const PM_CHECKS: Record<string, { title: string; items: string[] }> = {
   canopyHood: { title: "TOP BOX / CANOPY", items: ["Encrypting PIN pad and FDKs working", "Card reader: cleaned, transport clear, test transaction done", "Journal printer cleaned, print legible", "Receipt printer cleaned and working", "PC Core: opened and cleaned"] },
   cashDispenser: { title: "Cash Dispenser Modules", items: ["All cassettes working (self-test run, notes learned)", "All pick modules / slots working", "D-wheel timing and status of all pick lines checked", "Carriage, Bill Aligner Module and SNT checked & cleaned", "Worn suction cups replaced", "Filter replaced", "Exit shutter cleaned"] },
@@ -327,12 +345,158 @@ const INITIAL_COUNTS: Record<JobCardFilter, number> = {
   draft: 0,
 };
 
+function loadExternalScript(src: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Unable to load PDF dependency: ${src}`));
+    document.head.appendChild(script);
+  });
+}
+
+async function loadPdfLibraries() {
+  const dependencies: Promise<void>[] = [];
+  if (!window.jspdf) {
+    dependencies.push(loadExternalScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"));
+  }
+  if (!window.html2canvas) {
+    dependencies.push(loadExternalScript("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"));
+  }
+  await Promise.all(dependencies);
+
+  if (!window.jspdf || !window.html2canvas) {
+    throw new Error("PDF download libraries did not initialize.");
+  }
+
+  return { JsPDF: window.jspdf.jsPDF, html2canvas: window.html2canvas };
+}
+
+async function downloadJobCardPdf(
+  id: number,
+  JsPDF: NonNullable<typeof window.jspdf>["jsPDF"],
+  html2canvas: NonNullable<typeof window.html2canvas>,
+) {
+  const response = await fetch(`/job-cards/${id}/print`, {
+    headers: { Accept: "text/html", "X-Requested-With": "XMLHttpRequest" },
+    credentials: "same-origin",
+  });
+  if (!response.ok) {
+    throw new Error(`Unable to load job card ${id} (${response.status}).`);
+  }
+
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.tabIndex = -1;
+  iframe.style.cssText = "position:fixed;left:-10000px;top:0;width:900px;height:1200px;border:0";
+  document.body.appendChild(iframe);
+
+  try {
+    const loaded = new Promise<void>((resolve, reject) => {
+      iframe.onload = () => resolve();
+      iframe.onerror = () => reject(new Error(`Unable to render job card ${id}.`));
+    });
+    iframe.srcdoc = await response.text();
+    await loaded;
+
+    const printDocument = iframe.contentDocument;
+    const sheet = printDocument?.querySelector<HTMLElement>(".sheet");
+    if (!printDocument || !sheet) {
+      throw new Error(`The print layout for job card ${id} is missing.`);
+    }
+
+    await Promise.all(Array.from(printDocument.images).map(image => {
+      if (image.complete) {
+        return image.naturalWidth > 0
+          ? Promise.resolve()
+          : Promise.reject(new Error(`An image failed to load for job card ${id}.`));
+      }
+
+      return new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error(`An image failed to load for job card ${id}.`));
+      });
+    }));
+
+    const canvas = await html2canvas(sheet, {
+      scale: 2,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      windowWidth: 900,
+    });
+    if (!canvas.width || !canvas.height) {
+      throw new Error(`The PDF preview for job card ${id} is empty.`);
+    }
+    const pdf = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4", compress: true });
+    const margin = 8;
+    const printableWidth = 210 - margin * 2;
+    const printableHeight = 297 - margin * 2;
+    const maxSliceHeight = Math.floor(canvas.width * printableHeight / printableWidth);
+
+    for (let offsetY = 0; offsetY < canvas.height; offsetY += maxSliceHeight) {
+      const sliceHeight = Math.min(maxSliceHeight, canvas.height - offsetY);
+      const slice = document.createElement("canvas");
+      slice.width = canvas.width;
+      slice.height = sliceHeight;
+      const context = slice.getContext("2d");
+      if (!context) throw new Error(`Unable to prepare job card ${id} for PDF download.`);
+      context.drawImage(canvas, 0, offsetY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+
+      if (offsetY > 0) pdf.addPage();
+      pdf.addImage(
+        slice.toDataURL("image/jpeg", 0.94),
+        "JPEG",
+        margin,
+        margin,
+        printableWidth,
+        sliceHeight * printableWidth / canvas.width,
+        undefined,
+        "FAST",
+      );
+    }
+
+    const filename = [...(printDocument.title || `JobCard-${id}`)]
+      .map(character => character.charCodeAt(0) < 32 ? "-" : character)
+      .join("")
+      .replace(/[<>:"/\\|?*]/g, "-")
+      .replace(/\s+/g, "-");
+    pdf.save(`${filename}.pdf`);
+  } finally {
+    iframe.remove();
+  }
+}
+
+function buildJobCardParams(filters: {
+  status: JobCardFilter;
+  search: string;
+  jobType: string;
+  quarter: string;
+  year: string;
+  bankId: string;
+}, page: number, perPage: number): URLSearchParams {
+  const params = new URLSearchParams({
+    status: filters.status,
+    page: String(page),
+    per_page: String(perPage),
+    search: filters.search,
+    job_type: filters.jobType,
+  });
+  if (filters.quarter !== "all") params.set("quarter", filters.quarter);
+  if (filters.year !== "all") params.set("year", filters.year);
+  if (filters.bankId !== "all") params.set("bank_id", filters.bankId);
+  return params;
+}
+
 export default function JobCardsModule({ banks, onApproved }: JobCardsModuleProps) {
   const [cards, setCards]       = useState<JobCard[]>([]);
   const [filter, setFilter]     = useState<JobCardFilter>("submitted");
   const [search, setSearch]     = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [jobType, setJobType]   = useState("all");
+  const [quarter, setQuarter]   = useState("all");
+  const [year, setYear]         = useState("all");
+  const [bankId, setBankId]     = useState("all");
   const [page, setPage]         = useState(1);
   const [refreshKey, setRefreshKey] = useState(0);
   const [lastPage, setLastPage] = useState(1);
@@ -343,6 +507,15 @@ export default function JobCardsModule({ banks, onApproved }: JobCardsModuleProp
   const [detail, setDetail]     = useState<JobCard | null>(null);
   const [rejectTarget, setRejectTarget] = useState<JobCard | null>(null);
   const [selectedIds, setSelectedIds]   = useState<number[]>([]);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  const filters = { status: filter, search: debouncedSearch, jobType, quarter, year, bankId };
+  const yearOptions = Array.from(
+    { length: Math.max(1, new Date().getFullYear() - 2019) },
+    (_, index) => new Date().getFullYear() - index,
+  );
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -363,21 +536,49 @@ export default function JobCardsModule({ banks, onApproved }: JobCardsModuleProp
       : [...new Set([...selected, ...visibleIds])];
   });
 
-  const bulkDownload = () => {
-    if (selectedIds.length === 0) return;
-    const form = document.createElement("form");
-    form.method = "POST"; form.action = "/job-cards/bulk-download";
-    const csrf = document.createElement("input");
-    csrf.type = "hidden";
-    csrf.name = "_token";
-    csrf.value = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? "";
-    form.appendChild(csrf);
-    selectedIds.forEach(id => {
-      const inp = document.createElement("input");
-      inp.type = "hidden"; inp.name = "ids[]"; inp.value = String(id);
-      form.appendChild(inp);
-    });
-    document.body.appendChild(form); form.submit(); document.body.removeChild(form);
+  const downloadJobCards = async (requestedIds?: number[]) => {
+    setDownloading(true);
+    setDownloadError(null);
+    setDownloadProgress(requestedIds ? "Preparing selected job cards…" : "Finding matching job cards…");
+    let completed = 0;
+
+    try {
+      let ids = requestedIds;
+      if (!ids) {
+        const params = buildJobCardParams(filters, 1, 100);
+        params.set("ids_only", "1");
+        const response = await fetch(`/job-cards/data?${params}`, {
+          headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
+          credentials: "same-origin",
+        });
+        if (!response.ok) throw new Error(`Unable to find matching job cards (${response.status}).`);
+        const result = await response.json() as { ids: number[] };
+        ids = result.ids;
+      }
+
+      if (ids.length === 0) {
+        setDownloadError("No job cards match the current filters.");
+        setDownloadProgress(null);
+        return;
+      }
+
+      const libraries = await loadPdfLibraries();
+      for (const [index, id] of ids.entries()) {
+        setDownloadProgress(`Creating PDF ${index + 1} of ${ids.length}…`);
+        await downloadJobCardPdf(id, libraries.JsPDF, libraries.html2canvas);
+        completed += 1;
+        await new Promise(resolve => window.setTimeout(resolve, 150));
+      }
+      setDownloadProgress(`Downloaded ${completed} ${completed === 1 ? "PDF" : "PDFs"}.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "PDF download failed.";
+      setDownloadError(completed > 0
+        ? `${message} ${completed} PDF${completed === 1 ? "" : "s"} downloaded before the failure.`
+        : message);
+      setDownloadProgress(null);
+    } finally {
+      setDownloading(false);
+    }
   };
 
   useEffect(() => {
@@ -385,13 +586,14 @@ export default function JobCardsModule({ banks, onApproved }: JobCardsModuleProp
     const fetchCards = async () => {
       setLoading(true);
       try {
-        const params = new URLSearchParams({
+        const params = buildJobCardParams({
           status: filter,
-          page: String(page),
-          per_page: String(PAGE_SIZE),
           search: debouncedSearch,
-          job_type: jobType,
-        });
+          jobType,
+          quarter,
+          year,
+          bankId,
+        }, page, PAGE_SIZE);
         const res = await fetch(`/job-cards/data?${params}`, {
           headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
           credentials: "same-origin",
@@ -417,7 +619,7 @@ export default function JobCardsModule({ banks, onApproved }: JobCardsModuleProp
 
     void fetchCards();
     return () => controller.abort();
-  }, [filter, page, refreshKey, debouncedSearch, jobType]);
+  }, [filter, page, refreshKey, debouncedSearch, jobType, quarter, year, bankId]);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -431,6 +633,7 @@ export default function JobCardsModule({ banks, onApproved }: JobCardsModuleProp
       return;
     }
     setLoading(true);
+    setSelectedIds([]);
     setFilter(nextFilter);
     setPage(1);
   };
@@ -505,11 +708,24 @@ export default function JobCardsModule({ banks, onApproved }: JobCardsModuleProp
         </div>
         <div className="jobcards-header-actions">
           {selectedIds.length > 0 && (
-            <button className="jobcards-button jobcards-button--primary" onClick={bulkDownload}>
-              <span aria-hidden="true">↓</span> Download selected <span className="jobcards-button-count">{selectedIds.length}</span>
+            <button
+              className="jobcards-button jobcards-button--secondary"
+              onClick={() => void downloadJobCards(selectedIds)}
+              disabled={downloading || loading}
+            >
+              <span aria-hidden="true">↓</span> Download selected PDFs <span className="jobcards-button-count">{selectedIds.length}</span>
             </button>
           )}
-          <button className="jobcards-button jobcards-button--secondary" onClick={refresh} disabled={loading}>
+          {total > 0 && (
+            <button
+              className="jobcards-button jobcards-button--primary"
+              onClick={() => void downloadJobCards()}
+              disabled={downloading || loading}
+            >
+              <span aria-hidden="true">↓</span> Download all filtered PDFs <span className="jobcards-button-count">{total}</span>
+            </button>
+          )}
+          <button className="jobcards-button jobcards-button--secondary" onClick={refresh} disabled={loading || downloading}>
             <span className={loading ? "jobcards-refresh-icon is-spinning" : "jobcards-refresh-icon"} aria-hidden="true">↻</span>
             Refresh
           </button>
@@ -528,6 +744,7 @@ export default function JobCardsModule({ banks, onApproved }: JobCardsModuleProp
                   className={`jobcards-filter${active ? " is-active" : ""}`}
                   role="tab"
                   aria-selected={active}
+                  disabled={downloading}
                 >
                   {FILTER_LABELS[f]}
                   <span className="jobcards-filter-count">{statusCounts[f]}</span>
@@ -539,20 +756,52 @@ export default function JobCardsModule({ banks, onApproved }: JobCardsModuleProp
             <input
               type="search"
               value={search}
-              onChange={event => setSearch(event.target.value)}
+              onChange={event => { setSearch(event.target.value); setSelectedIds([]); }}
               placeholder="Search ATM, card #, bank, engineer…"
               aria-label="Search job cards"
               className="jobcards-search"
+              disabled={downloading}
             />
             <select
               value={jobType}
-              onChange={event => { setJobType(event.target.value); setPage(1); }}
+              onChange={event => { setJobType(event.target.value); setPage(1); setSelectedIds([]); }}
               aria-label="Filter job cards by type"
               className="jobcards-type-filter"
+              disabled={downloading}
             >
               <option value="all">All job types</option>
               <option value="maintenance">PM</option>
               <option value="repair">Repair</option>
+            </select>
+            <select
+              value={quarter}
+              onChange={event => { setQuarter(event.target.value); setPage(1); setSelectedIds([]); }}
+              aria-label="Filter job cards by quarter"
+              className="jobcards-filter-select"
+              disabled={downloading}
+            >
+              <option value="all">All quarters</option>
+              {[1, 2, 3, 4].map(value => <option key={value} value={value}>Q{value}</option>)}
+            </select>
+            <select
+              value={year}
+              onChange={event => { setYear(event.target.value); setPage(1); setSelectedIds([]); }}
+              aria-label="Filter job cards by year"
+              className="jobcards-filter-select"
+              disabled={downloading}
+            >
+              <option value="all">All years</option>
+              {yearOptions.map(value => <option key={value} value={value}>{value}</option>)}
+            </select>
+            <select
+              value={bankId}
+              onChange={event => { setBankId(event.target.value); setPage(1); setSelectedIds([]); }}
+              aria-label="Filter job cards by bank"
+              className="jobcards-filter-select"
+              disabled={downloading}
+            >
+              <option value="all">All banks</option>
+              {banks.map(bank => <option key={bank.id} value={bank.id}>{bank.short_code} · {bank.name}</option>)}
             </select>
           </div>
         </div>
@@ -561,6 +810,12 @@ export default function JobCardsModule({ banks, onApproved }: JobCardsModuleProp
           {loading ? "Updating records…" : `${total} ${total === 1 ? "record" : "records"}`}
           {selectedIds.length > 0 && <span className="jobcards-selection-count">{selectedIds.length} selected</span>}
         </div>
+
+        {(downloadProgress || downloadError) && (
+          <div className={`jobcards-download-message${downloadError ? " is-error" : ""}`} role={downloadError ? "alert" : "status"} aria-live="polite">
+            {downloadError || downloadProgress}
+          </div>
+        )}
 
         {loadError ? (
           <div className="jobcards-empty" role="alert">

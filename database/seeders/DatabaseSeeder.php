@@ -48,6 +48,8 @@ class DatabaseSeeder extends Seeder
         MaintenanceRecord::create(['atm_id' => $atms[3]->id, 'engineer_id' => $chanda->id,  'type' => 'Quarterly PM',       'status' => 'Scheduled',   'scheduled_date' => '2024-07-15', 'completed_date' => null,         'quarter' => 3, 'year' => 2024, 'notes' => null]);
         MaintenanceRecord::create(['atm_id' => $atms[4]->id, 'engineer_id' => $mulenga->id, 'type' => 'Emergency',          'status' => 'Completed',   'scheduled_date' => '2024-06-28', 'completed_date' => '2024-06-29', 'quarter' => 2, 'year' => 2024, 'notes' => 'Power surge damage. Replaced PSU.']);
 
+        $this->call(MaintenanceSeeder::class);
+
         $this->command->info('✓ ATM Fleet Manager seeded successfully.');
     }
 }
