@@ -1,39 +1,55 @@
-FROM php:8.3-cli
+FROM dunglas/frankenphp:1-php8.3-bookworm AS base
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    git curl zip unzip libpq-dev libzip-dev libxml2-dev libonig-dev \
-    && docker-php-ext-install pdo pdo_pgsql pgsql mbstring xml zip \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install Node 20
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs
-
-# Install Composer
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+RUN cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini" \
+    && install-php-extensions pdo_pgsql pgsql mbstring xml zip
 
 WORKDIR /app
 
-# Copy composer files first for layer caching
-COPY composer.json composer.lock ./
-RUN composer install --optimize-autoloader --no-dev --no-scripts --no-interaction
+FROM base AS build
 
-# Copy package files and install
-COPY package.json package-lock.json ./
-RUN npm ci --include=dev
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+RUN apt-get update \
+    && apt-get install -y ca-certificates curl gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+    && apt-get install -y nodejs
 
-# Copy rest of application
+COPY composer.json composer.lock package.json package-lock.json ./
+RUN composer install \
+    --no-dev \
+    --no-interaction \
+    --no-progress \
+    --no-scripts \
+    --optimize-autoloader \
+    --prefer-dist \
+    && npm ci
+
 COPY . .
+RUN mkdir -p \
+        storage/framework/cache \
+        storage/framework/sessions \
+        storage/framework/views \
+        bootstrap/cache \
+    && composer dump-autoload --no-dev --classmap-authoritative \
+    && APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= npm run build \
+    && rm -rf node_modules
 
-# Build frontend assets only — NO config:cache here
-RUN npm run build
+FROM base AS runtime
 
-EXPOSE $PORT
+COPY --from=build --chown=www-data:www-data /app /app
+COPY --chown=www-data:www-data Caddyfile /etc/frankenphp/Caddyfile
 
-# At runtime: clear any stale cache, then cache fresh with real env vars, migrate, serve
-CMD php artisan config:clear && \
-    php artisan config:cache && \
-    php artisan route:cache && \
-    php artisan migrate --force && \
-    php artisan serve --host=0.0.0.0 --port=$PORT
+RUN setcap CAP_NET_BIND_SERVICE=+eip /usr/local/bin/frankenphp \
+    && chown -R www-data:www-data /config/caddy /data/caddy
+
+ENV PORT=80 \
+    APP_ENV=production \
+    APP_DEBUG=false \
+    LOG_CHANNEL=stderr \
+    LARAVEL_STORAGE_PATH=/tmp/laravel-storage \
+    CACHE_STORE=database \
+    SESSION_DRIVER=database \
+    QUEUE_CONNECTION=sync
+
+USER www-data
+
+CMD ["frankenphp", "run", "--config", "/etc/frankenphp/Caddyfile"]
