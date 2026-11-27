@@ -1,171 +1,387 @@
-# Deploy ATM Maestro to Vercel (free tier)
+# Deploying ATM Maestro to Vercel + Neon (beginner guide)
 
-ATM Maestro runs on Vercel's **Container Runtime** (Beta, available on the
-free Hobby plan) using the repo's `Dockerfile` + FrankenPHP. The database is a
-free hosted PostgreSQL: **Neon (recommended)** or **Supabase**.
+This guide takes you from "code on my computer" to "working website on the
+internet", using only free accounts. No prior deployment experience needed.
 
-Every push to `main` deploys Production; other branches/PRs get Preview URLs.
+**What each service does**
 
-| File | Purpose |
-| --- | --- |
-| [Dockerfile](../Dockerfile) | Builds PHP deps + Vite assets, runs FrankenPHP |
-| [Caddyfile](../Caddyfile) | Serves `public/` on Vercel's `PORT` |
-| [docker/start-container.sh](../docker/start-container.sh) | Creates `/tmp` storage dirs, starts the server |
-| [vercel.json](../vercel.json) | Tells Vercel to build the Dockerfile as a container |
-| [.github/workflows/migrate.yml](../.github/workflows/migrate.yml) | Runs migrations/seeding from GitHub |
+| Service | Role | Cost |
+| --- | --- | --- |
+| **GitHub** | Stores your code. Vercel and the migration workflow read from it. | Free |
+| **Vercel** | Runs the website (the Laravel app, inside a Docker container). | Free (Hobby plan) |
+| **Neon** | Hosts the PostgreSQL database (users, ATMs, calls, job cards). | Free plan |
+
+**How it fits together**
+
+```
+You push code ──► GitHub ──► Vercel builds + runs the app ──► Neon (database)
+                     │
+                     └──► GitHub Action creates the database tables in Neon
+```
+
+Time needed: about 30–45 minutes the first time.
+
+> The Vercel and Neon websites change their layout from time to time. If a
+> button is named slightly differently from this guide, look for the closest
+> match. The ideas stay the same.
 
 ---
 
-## 1. Import the GitHub repo into Vercel
+## Part 0 — Before you start
 
-1. Push this repo to GitHub (`main`).
-2. In Vercel: **Add New → Project**, import `ATM-MAESTRO`.
-3. Root Directory `./`. Leave Build/Install/Output overrides **empty**.
-4. Framework preset: choose **Container** (or **Other**). Vercel may suggest
-   *Vite* — don't use it. If the wrong preset sticks, fix it from the CLI:
+You need:
 
-   ```sh
-   npm i -g vercel
-   vercel link
-   vercel project update --framework container --yes
-   ```
+- A **GitHub account** with this repo already on it (`kayunga/ATM-MAESTRO`).
+- **Git** installed on your computer (you already use it).
+- **PHP** on your computer (Laravel Herd provides this). You only need it once,
+  to generate a secret key.
 
-5. Click **Deploy**. The first deploy will build but won't work until steps
-   2–3 are done; you'll redeploy afterwards.
+Create free accounts (use "Continue with GitHub" for the easiest login):
 
-## 2. Create the database
+1. Vercel: <https://vercel.com/signup>
+2. Neon: <https://neon.tech> (you can also create Neon from inside Vercel in
+   Part 3, which is the easiest way).
 
-### Option A — Neon (recommended)
+---
 
-1. Vercel project → **Storage → Create Database → Neon** (free plan).
-2. Connect it to the project for **Production** and **Preview**, with
-   **no custom prefix**. Leave "create database branch for Preview" on so
-   previews never touch production data.
-3. Neon adds `DATABASE_URL` (pooled) and `DATABASE_URL_UNPOOLED` to the
-   project. The app reads `DATABASE_URL` automatically — nothing to copy.
+## Part 1 — Push the deployment files to GitHub
 
-### Option B — Supabase
+Vercel can only deploy what is on GitHub. Open a terminal (PowerShell) in the
+project folder and run:
 
-1. Vercel project → **Storage → Supabase** (or create a project on
-   supabase.com and connect it).
-2. The integration adds `POSTGRES_URL` (transaction pooler, port 6543), which
-   the app reads automatically. Also add this variable (see step 3):
+```powershell
+git status
+```
+
+You should see changed files such as `Dockerfile`, `config/database.php`,
+`.gitignore`, and new ones such as `docker/` and
+`.github/workflows/migrate.yml`.
+
+Check that no secret files are included. `.env` and `.env.local` must **not**
+appear in the list. (They are ignored by `.gitignore`; only `.env.example`
+should be tracked.)
+
+Then commit and push:
+
+```powershell
+git add .
+git commit -m "Configure Vercel + Neon deployment"
+git push origin main
+```
+
+Open the repo on GitHub in your browser and confirm that `Dockerfile`,
+`Caddyfile`, `vercel.json`, and the `docker` folder are there.
+
+---
+
+## Part 2 — Create the Vercel project
+
+1. Go to <https://vercel.com/new> and sign in.
+2. Under **Import Git Repository**, click **Adjust GitHub App Permissions** if
+   your repo isn't listed, and allow access to `ATM-MAESTRO`.
+3. Click **Import** next to `ATM-MAESTRO`.
+4. On the configuration screen:
+   - **Project Name:** anything you like. This becomes your web address:
+     `https://<project-name>.vercel.app`.
+   - **Framework Preset:** choose **Container**. If it isn't offered, choose
+     **Other**. Do **not** pick Vite, because Laravel is the real app.
+   - **Root Directory:** leave as `./`.
+   - **Build / Output / Install commands:** leave everything empty. The
+     Dockerfile does all the building.
+5. **Do not click Deploy yet.** Open **Environment Variables** on this screen
+   and add the two variables from Part 4 first. If you prefer, click **Deploy**
+   now. It will fail or show an error page. That is expected, and you will
+   redeploy after Parts 3–5.
+
+**If Vercel picked the wrong framework** and you can't change it in the
+dashboard, use the CLI from the project folder:
+
+```powershell
+npm install --global vercel
+vercel login
+vercel link
+vercel project update --framework container --yes
+```
+
+---
+
+## Part 3 — Set up Neon (the database)
+
+You have two ways to do this. **Option A is recommended**: Vercel creates the
+Neon database for you and shares the connection details with the project
+automatically.
+
+### Option A — Create Neon from inside Vercel (recommended)
+
+1. In your Vercel project, open the **Storage** tab.
+2. Click **Create Database** (or **Browse Marketplace**) and choose **Neon**
+   (Postgres).
+3. Accept the terms and pick the **Free** plan.
+4. Choose a **Region**. Pick the one closest to where your Vercel app runs.
+   Vercel's default is usually US East, so choose a US East Neon region
+   (e.g. *AWS US East (N. Virginia)*). Matching regions keeps the site fast.
+   You cannot change the region later without recreating the database.
+5. Give the database a name, e.g. `atm-maestro-db`, and click **Create**.
+6. When asked to connect it to a project, choose your **ATM-MAESTRO** project.
+   Settings to use in the dialog:
+   - **Environments:** tick **Production** and **Preview**. Leave
+     **Development** unticked.
+   - **Custom Prefix:** leave it **empty**.
+   - **Create database branch for deployment:** tick **Preview**; leave
+     **Production** unticked. (This gives every preview deployment its own
+     copy of the database, so tests can never damage real data.)
+7. Click **Connect / Install**.
+
+Vercel now adds these variables to your project (check **Settings →
+Environment Variables**):
+
+| Variable | Meaning |
+| --- | --- |
+| `DATABASE_URL` | **Pooled** connection. The app uses this automatically. |
+| `DATABASE_URL_UNPOOLED` | **Direct** connection. Used for migrations. |
+
+You don't have to copy or edit `DATABASE_URL`. The app reads it by itself.
+
+### Option B — Create Neon directly at neon.tech
+
+Use this if you prefer to manage Neon separately.
+
+1. Sign in at <https://console.neon.tech> and click **New Project**.
+2. Enter a name (`atm-maestro`), pick the same region as above, keep the
+   default Postgres version, and click **Create**.
+3. On the project dashboard, click **Connect**. You will see a connection
+   string like:
 
    ```text
-   DB_EMULATE_PREPARES=true
+   postgresql://username:password@ep-something-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require
    ```
 
-   The transaction pooler doesn't support server-side prepared statements;
-   this setting makes Laravel work with it.
+4. Turn the **Connection pooling** switch **on** and copy that string. This is
+   your pooled URL. Turn pooling **off** and copy the string again. This is
+   your direct (unpooled) URL.
+5. In Vercel → **Settings → Environment Variables**, add `DB_URL` with the
+   **pooled** string (scope: Production, and mark it **Sensitive**).
 
-If you connect a database manually instead of via an integration, set
-`DB_URL` to its pooled connection string.
+### Find your direct (unpooled) connection string
 
-## 3. Set environment variables
+You need this in Part 5.
 
-Generate an app key locally (keep it secret, never commit it):
+- **Option A:** Vercel → **Storage** → click your Neon database → **Open in
+  Neon**. In Neon, click **Connect**, switch **Connection pooling** off, and
+  copy the string.
+- **Option B:** you already copied it in step 4.
 
-```sh
-php artisan key:generate --show
-```
+Keep it somewhere private (a password manager). Treat it like a password.
 
-Vercel → **Settings → Environment Variables**, scope **Production**:
+---
 
-```text
-APP_KEY=base64:...            (from the command above, mark Sensitive)
-APP_URL=https://<your-project>.vercel.app
-```
+## Part 4 — Add the app's secret key and URL
 
-That's all that's required. The Dockerfile already sets
-`APP_ENV=production`, `APP_DEBUG=false`, `LOG_CHANNEL=stderr`,
-`SESSION_DRIVER=database`, `CACHE_STORE=database`, `QUEUE_CONNECTION=sync`.
-Override any of them here if needed.
+Laravel needs a secret key to encrypt sessions and cookies.
 
-For Preview deployments, add a **different** `APP_KEY` scoped to Preview.
+1. In PowerShell, in the project folder:
 
-## 4. Run migrations (and seed) from GitHub
+   ```powershell
+   php artisan key:generate --show
+   ```
 
-No local PHP/Postgres setup required.
+   It prints something like `base64:AbC123...=`. Copy the whole line,
+   including `base64:`.
 
-1. GitHub repo → **Settings → Secrets and variables → Actions → New
-   repository secret**:
+   > Use a **new** key for production. Do not reuse the one from your local
+   > `.env`, because an old copy was published in `.env.example` on GitHub.
 
-   | Secret | Value |
+2. In Vercel → your project → **Settings → Environment Variables**, add:
+
+   | Name | Value | Environments |
+   | --- | --- | --- |
+   | `APP_KEY` | the `base64:...` key | Production (mark **Sensitive**) |
+   | `APP_URL` | `https://<project-name>.vercel.app` | Production |
+
+   Your exact address is shown on the project's **Overview** page after the
+   first deploy (or under **Settings → Domains**).
+
+3. Optional, for Preview deployments: add a **different** `APP_KEY` (generate
+   another with the same command) scoped to **Preview** only.
+
+Everything else (`APP_ENV=production`, `APP_DEBUG=false`, logging, sessions,
+cache) is already set inside the Dockerfile. You don't need to add anything.
+
+---
+
+## Part 5 — Create the database tables (migrations)
+
+A new Neon database is empty. The tables (users, ATMs, calls, ...) have to be
+created. This repo includes a GitHub workflow that does it for you, so you
+don't need anything installed locally.
+
+### 5.1 Add secrets to GitHub
+
+1. On GitHub, open your repo → **Settings → Secrets and variables → Actions**.
+2. Click **New repository secret** and add these three, one at a time:
+
+   | Name | Value |
    | --- | --- |
-   | `PRODUCTION_DATABASE_URL` | Neon: value of `DATABASE_URL_UNPOOLED`. Supabase: **Connect → Session pooler** string (port 5432). |
-   | `PGSSEED_ADMIN_PASSWORD` | Strong password, 12+ chars (only for seeding) |
-   | `PGSSEED_ENGINEER_PASSWORD` | Different strong password (only for seeding) |
+   | `PRODUCTION_DATABASE_URL` | the **direct/unpooled** Neon string from Part 3 |
+   | `PGSSEED_ADMIN_PASSWORD` | a strong password for the admin account (12+ characters, with upper/lower case, numbers, symbols) |
+   | `PGSSEED_ENGINEER_PASSWORD` | a different strong password for the three engineer accounts |
 
-   Get the Neon/Supabase connection string from the provider dashboard
-   (Vercel → Storage → your DB → *Open in Neon/Supabase*).
+   Write the two passwords down. You will use them to log in.
 
-2. GitHub → **Actions → migrate database → Run workflow**. Tick **seed** the
-   first time to create the early-access accounts.
+### 5.2 Run the workflow
 
-After that, the workflow runs automatically whenever a push to `main`
-changes `database/migrations/`.
+1. In GitHub, open the **Actions** tab.
+2. In the left list, click **migrate database**. (If it isn't listed, make
+   sure Part 1 pushed `.github/workflows/migrate.yml` to `main`. If GitHub
+   asks you to enable workflows, click the green button.)
+3. Click **Run workflow** (right side), keep branch `main`, **tick "Also run
+   the early-access seeder"**, and click the green **Run workflow** button.
+4. Wait about a minute and refresh. A green check mark means success.
+   Click the run to see logs. You should see lines like `Migrating:
+   2024_01_01_000000_create_banks_table` followed by `DONE`.
 
-The seeder creates one admin, three engineers, one bank, three ATMs and three
-calls, and is safe to re-run:
+The seeder creates one admin, three engineers, a sample bank, three ATMs and
+three calls:
 
-- Admin: `early-access-admin@example.com`
-- Engineers: `lusaka.engineer@example.com`, `copperbelt.engineer@example.com`,
-  `southern.engineer@example.com`
+| Role | Email | Password |
+| --- | --- | --- |
+| Admin | `early-access-admin@example.com` | your `PGSSEED_ADMIN_PASSWORD` |
+| Engineer | `lusaka.engineer@example.com` | your `PGSSEED_ENGINEER_PASSWORD` |
+| Engineer | `copperbelt.engineer@example.com` | same engineer password |
+| Engineer | `southern.engineer@example.com` | same engineer password |
 
-Change these passwords after first login.
+From now on, the workflow runs on its own whenever you push a new migration
+file to `main`. You never need to tick "seed" again.
+
+### 5.3 Check the data in Neon (optional)
+
+In the Neon console, open **Tables**. You should see `users`, `atms`,
+`calls`, `job_cards` and others.
 
 <details>
-<summary>Alternative: run migrations from your machine</summary>
+<summary>Alternative: run migrations from your own computer</summary>
 
-Requires PHP 8.3+ with `pdo_pgsql` (Herd includes it). In PowerShell, from
-the repo root (shell variables override your local `.env`):
+Needs PHP 8.3+ with the `pdo_pgsql` extension (Laravel Herd includes it).
+In PowerShell from the project folder (these shell variables override your
+local `.env` for this window only):
 
 ```powershell
 $env:DB_CONNECTION = 'pgsql'
-$env:DB_URL = '<unpooled connection string>'
+$env:DB_URL = '<direct/unpooled Neon connection string>'
 php artisan migrate --force
+
 # first time only:
 $env:PGSSEED_ADMIN_PASSWORD = '<strong password>'
 $env:PGSSEED_ENGINEER_PASSWORD = '<different strong password>'
 php artisan db:seed --class=Pgsseeder --force
 ```
 
-Close the terminal afterwards so the credentials don't linger.
+Close the terminal window afterwards so the credentials don't linger.
 </details>
 
-## 5. Redeploy and verify
+---
 
-Vercel → **Deployments → ⋯ → Redeploy** (env var changes need a redeploy).
+## Part 6 — Deploy and test
 
-1. `https://<your-project>.vercel.app/up` → Laravel health page.
-2. Open the site and log in with a seeded account.
-3. API check:
-   `POST /api/v1/auth/login` with `{"email","password","device_name"}` and
-   `Accept: application/json` returns a bearer token; `GET /api/v1/me` with
-   `Authorization: Bearer <token>` returns the user.
+Environment variables only apply to **new** deployments, so redeploy now.
 
-If you get a 500/502, check **Deployment → Logs (Runtime)**. Common causes:
-missing `APP_KEY`, migrations not run (missing `sessions`/`cache` tables), or
-no database variable connected to that environment.
+1. Vercel → your project → **Deployments**.
+2. Click the **⋯** menu on the latest deployment → **Redeploy**.
+3. Wait for the status to become **Ready**. The first Docker build takes
+   several minutes. Later builds are faster.
 
-## 6. Mobile app
+Now test, replacing the address with yours:
 
-API base URL: `https://<your-project>.vercel.app/api/v1` (see
-[mobile-api-v1.md](./mobile-api-v1.md)). If **Deployment Protection** is on,
-production URLs stay public on Hobby, but preview URLs require login — test the
-mobile app against Production. Never embed a protection-bypass secret in the
-app.
+1. **Health check:** open `https://<project-name>.vercel.app/up`. You should
+   see a page saying the application is up.
+2. **Website:** open `https://<project-name>.vercel.app` and log in with
+   `early-access-admin@example.com` and your admin password.
+3. **API (for the mobile app).** In PowerShell:
 
-## Free-tier limitations
+   ```powershell
+   $body = @{ email='lusaka.engineer@example.com'; password='<engineer password>'; device_name='test' } | ConvertTo-Json
+   Invoke-RestMethod -Method Post -Uri https://<project-name>.vercel.app/api/v1/auth/login -Body $body -ContentType 'application/json' -Headers @{Accept='application/json'}
+   ```
 
-- **Uploaded files are not persistent.** Container storage is ephemeral
-  (`/tmp`), so job-card photos/attachments on the `public` disk disappear when
-  the instance recycles. For durable uploads, move the disk to S3-compatible
-  storage (e.g. Supabase Storage or Cloudflare R2) via `league/flysystem-aws-s3-v3`.
-- **Cold starts.** Idle instances scale down after ~5 minutes; the next
-  request takes a few seconds.
-- **No background workers.** `QUEUE_CONNECTION=sync` runs jobs inline. Use
-  Vercel Cron for scheduled tasks if needed.
-- **Neon free tier** suspends compute when idle (first query after a pause is
-  slower). **Supabase free** projects pause after a week of inactivity.
-- Container Runtime is **Beta** — check Vercel's usage page for Hobby limits.
+   A token in the response means the API and database both work.
+
+**The first request after a quiet period is slow** (a few seconds). The free
+container sleeps when idle, and so does Neon's free database. This is normal.
+
+---
+
+## Part 7 — Everyday workflow
+
+- **Change code:** edit, `git commit`, `git push origin main`. Vercel
+  rebuilds and deploys by itself.
+- **Try a change safely:** push to another branch or open a pull request.
+  Vercel gives it a separate Preview URL with its own Neon database branch.
+  (The first time you use a Preview, run the migrate workflow against it, or
+  expect empty tables.)
+- **Change the database structure:** add a Laravel migration, push to `main`.
+  The migrate workflow runs automatically, and Vercel deploys the code.
+- **See errors:** Vercel → Deployments → click one → **Logs** (Runtime Logs).
+- **Custom domain:** Vercel → **Settings → Domains**. Follow the DNS
+  instructions, then update `APP_URL` and redeploy.
+
+---
+
+## Part 8 — Connecting the mobile app
+
+Use this as the API base URL:
+
+```text
+https://<project-name>.vercel.app/api/v1
+```
+
+Endpoints are documented in [mobile-api-v1.md](./mobile-api-v1.md). On a
+phone, `localhost` means the phone itself, so always use the full Vercel
+address. If **Deployment Protection** is on, Preview URLs require a Vercel
+login, but Production stays public on the free plan. Test the mobile app
+against Production.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause and fix |
+| --- | --- |
+| Vercel build fails at `composer install` or `npm ci` | Open the build log. Usually a typo in a changed file. Re-run the build after fixing. |
+| Page shows **500 Server Error** | Open Runtime Logs. Most often `APP_KEY` is missing (add it in Part 4, then redeploy). |
+| Log says `No application encryption key` | `APP_KEY` is missing or not applied to this environment. Add it and redeploy. |
+| Log says `relation "sessions" does not exist` or `"cache" does not exist` | Migrations haven't run. Do Part 5. |
+| Log says `could not translate host name` / connection refused | No database URL on that environment. Check **Settings → Environment Variables** for `DATABASE_URL` (Neon) or `DB_URL`, scoped to Production. Then redeploy. |
+| Log says `prepared statement ... does not exist` | The pooled connection doesn't like prepared statements. Add `DB_EMULATE_PREPARES=true` in Vercel, or set `DB_URL` to the **unpooled** string. Then redeploy. |
+| Login works but you get logged out immediately | `APP_URL` wrong. It must be exactly your `https://...vercel.app` address. Fix and redeploy. |
+| Migrate workflow fails with `Add the PRODUCTION_DATABASE_URL` | Secret missing or misspelled (Part 5.1). |
+| Migrate workflow fails with `password authentication failed` | You pasted a wrong or old string. Copy a fresh one from Neon. |
+| Uploaded photos vanish | Expected on the free setup. See limits below. |
+| Site is slow on first visit | Cold start (container and database waking up). |
+
+---
+
+## Limits of the free setup
+
+- **Uploaded files are not permanent.** Job-card photos and attachments are
+  saved on the server's temporary disk, which is wiped whenever the container
+  restarts. To keep uploads, switch the Laravel `public` disk to S3-compatible
+  storage (Cloudflare R2, Supabase Storage, AWS S3). Ask for help doing this
+  when you need it.
+- **No background workers.** Queued jobs run immediately during the request
+  (`QUEUE_CONNECTION=sync`).
+- **Neon free plan** has storage and compute-hour limits and sleeps when idle.
+  Check <https://neon.tech/pricing> for current numbers.
+- **Vercel Container Runtime is in Beta.** Check your Vercel usage page for
+  free-plan limits.
+- This is good for tests and demos. For real production use with real bank
+  data, plan an upgrade (paid database, persistent file storage, backups).
+
+## Security checklist
+
+- Never commit `.env` files, database URLs, or `APP_KEY`.
+- Mark `APP_KEY` and database URLs as **Sensitive** in Vercel.
+- Change the seeded account passwords after first login, then remove
+  `PGSSEED_ADMIN_PASSWORD` and `PGSSEED_ENGINEER_PASSWORD` from GitHub
+  secrets if you no longer need to seed.
+- Keep Preview deployments on their own database branch, never the
+  production one.
