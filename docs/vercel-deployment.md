@@ -233,11 +233,23 @@ don't need anything installed locally.
 2. In the left list, click **migrate database**. (If it isn't listed, make
    sure Part 1 pushed `.github/workflows/migrate.yml` to `main`. If GitHub
    asks you to enable workflows, click the green button.)
-3. Click **Run workflow** (right side), keep branch `main`, **tick "Also seed
-   admin, banks, engineers, ATMs and calls"**, and click the green **Run workflow** button.
-4. Wait about a minute and refresh. A green check mark means success.
+3. Click **Run workflow** (right side), keep branch `main`, and choose:
+   - For a normal initial setup, tick **Also seed admin, banks, engineers,
+     ATMs and calls**.
+   - To erase the existing database and recreate the schema and default seed
+     data from scratch, also tick **fresh** and enter `WIPE` in **confirm_fresh**.
+     Keep **reset** unticked; a fresh migration clears the tables before the
+     seeder runs.
+4. Click the green **Run workflow** button.
+5. Wait about a minute and refresh. A green check mark means success.
    Click the run to see logs. You should see lines like `Migrating:
    2024_01_01_000000_create_banks_table` followed by `DONE`.
+
+**Warning:** `fresh` drops every table and all data in the configured
+production database, including users, job cards, and sessions. Back up
+anything you may need before running it. If you select `fresh` without
+entering the exact confirmation `WIPE`, the workflow stops before changing
+the database.
 
 The seed is the same one you run locally (`php artisan db:seed`): the admin
 account, all banks, engineers and ATMs, the call history, and the Q4 PM
