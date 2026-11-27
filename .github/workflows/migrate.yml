@@ -20,6 +20,14 @@ on:
         description: 'DANGER: allow the seeder to wipe existing job cards, calls and ATMs'
         type: boolean
         default: false
+      fresh:
+        description: 'DANGER: DROP ALL TABLES and DATA, then migrate from scratch'
+        type: boolean
+        default: false
+      confirm_fresh:
+        description: 'To use "fresh", type WIPE here'
+        type: string
+        default: ''
   push:
     branches:
       - main
@@ -64,7 +72,21 @@ jobs:
       - name: Install Composer dependencies
         run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
 
+      - name: Check fresh-migration confirmation
+        if: github.event_name == 'workflow_dispatch' && inputs.fresh && inputs.confirm_fresh != 'WIPE'
+        run: |
+          echo "::error::To wipe the database, tick 'fresh' AND type WIPE in 'confirm_fresh'."
+          exit 1
+
+      - name: Fresh migration (drops ALL data)
+        if: github.event_name == 'workflow_dispatch' && inputs.fresh && inputs.confirm_fresh == 'WIPE'
+        env:
+          # The app blocks destructive commands when APP_ENV=production.
+          APP_ENV: staging
+        run: php artisan migrate:fresh --force
+
       - name: Run migrations
+        if: github.event_name != 'workflow_dispatch' || ! inputs.fresh
         run: php artisan migrate --force
 
       - name: Seed application data
