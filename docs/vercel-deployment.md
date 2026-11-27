@@ -218,16 +218,14 @@ don't need anything installed locally.
 ### 5.1 Add secrets to GitHub
 
 1. On GitHub, open your repo → **Settings → Secrets and variables → Actions**.
-2. Click **New repository secret** and add these three, one at a time:
+2. Click **New repository secret** and add this one:
 
    | Name | Value |
    | --- | --- |
    | `PRODUCTION_DATABASE_URL` | the **direct/unpooled** Neon string from Part 3 |
-   | `SEED_ADMIN_PASSWORD` | the password for the admin account `admin@techmasters.zm` (12+ characters) |
-   | `SEED_ENGINEER_PASSWORD` | the initial password for every engineer account (12+ characters, different from the admin one) |
 
-   The passwords live only in GitHub Secrets, never in the code. Write them
-   down; engineers use the second one for their first login.
+   The initial account passwords are hardcoded for now in
+   `config/seeding.php` (see 5.2), so no password secrets are needed.
 
 ### 5.2 Run the workflow
 
@@ -247,8 +245,8 @@ schedule.
 
 | Role | Email | Password |
 | --- | --- | --- |
-| Admin | `admin@techmasters.zm` | your `SEED_ADMIN_PASSWORD` |
-| Engineers | `<firstname>@techmasters.zm` (e.g. `philip@techmasters.zm`) | your `SEED_ENGINEER_PASSWORD` |
+| Admin | `admin@techmasters.zm` | `admin@123` |
+| Engineers | `<firstname>@techmasters.zm` (e.g. `philip@techmasters.zm`) | `test@1234` |
 
 **Seed once only.** The seeder wipes banks, ATMs, engineers, calls and job
 cards before loading them. It refuses to run when job cards already exist.
@@ -275,9 +273,7 @@ $env:DB_CONNECTION = 'pgsql'
 $env:DB_URL = '<direct/unpooled Neon connection string>'
 php artisan migrate --force
 
-# first time only:
-$env:SEED_ADMIN_PASSWORD = '<strong password>'
-$env:SEED_ENGINEER_PASSWORD = '<different strong password>'
+# first time only (uses the passwords in config/seeding.php):
 php artisan db:seed --force
 ```
 
@@ -300,11 +296,11 @@ Now test, replacing the address with yours:
 1. **Health check:** open `https://<project-name>.vercel.app/up`. You should
    see a page saying the application is up.
 2. **Website:** open `https://<project-name>.vercel.app` and log in with
-   `admin@techmasters.zm` and your `SEED_ADMIN_PASSWORD`.
+   `admin@techmasters.zm` and password `admin@123`.
 3. **API (for the mobile app).** In PowerShell:
 
    ```powershell
-   $body = @{ email='philip@techmasters.zm'; password='<SEED_ENGINEER_PASSWORD>'; device_name='test' } | ConvertTo-Json
+   $body = @{ email='philip@techmasters.zm'; password='test@1234'; device_name='test' } | ConvertTo-Json
    Invoke-RestMethod -Method Post -Uri https://<project-name>.vercel.app/api/v1/auth/login -Body $body -ContentType 'application/json' -Headers @{Accept='application/json'}
    ```
 
@@ -385,8 +381,9 @@ against Production.
 
 - Never commit `.env` files, database URLs, or `APP_KEY`.
 - Mark `APP_KEY` and database URLs as **Sensitive** in Vercel.
-- Ask users to change their passwords after first login. Once seeding is
-  done, you can delete `SEED_ADMIN_PASSWORD` and `SEED_ENGINEER_PASSWORD`
-  from GitHub secrets.
+- The seed passwords (`admin@123`, `test@1234`) are public in the repo. Change
+  them in the web app right after seeding, and before real use set the
+  `SEED_ADMIN_PASSWORD` / `SEED_ENGINEER_PASSWORD` overrides or remove the
+  defaults in `config/seeding.php`.
 - Keep Preview deployments on their own database branch, never the
   production one.

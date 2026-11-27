@@ -6,11 +6,24 @@ use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Carbon\Carbon;
+use Database\Seeders\Concerns\ReadsSeedPasswords;
 
 class TechmastersSeeder extends Seeder
 {
+    use ReadsSeedPasswords;
+
     public function run(): void
     {
+        $engineerPassword = $this->seedPassword('engineer_password', 'SEED_ENGINEER_PASSWORD');
+
+        // This seeder wipes the fleet tables. Never let it silently destroy
+        // live job cards: it needs an explicit opt-in once data exists.
+        if (! config('seeding.allow_reset') && DB::table('job_cards')->exists()) {
+            throw new \RuntimeException(
+                'Job cards already exist; refusing to wipe them. Set SEED_ALLOW_RESET=true to override.'
+            );
+        }
+
         \Illuminate\Support\Facades\Schema::disableForeignKeyConstraints();
         DB::table('job_cards')->truncate();
         DB::table('calls')->truncate();
@@ -128,7 +141,7 @@ class TechmastersSeeder extends Seeder
             ['name' => 'Terence',     'region' => 'Central'],
         ];
 
-        $hashedPassword = Hash::make('test@1234');
+        $hashedPassword = Hash::make($engineerPassword);
 
         foreach ($engineerData as $eng) {
             $firstName = strtolower($eng['name']);

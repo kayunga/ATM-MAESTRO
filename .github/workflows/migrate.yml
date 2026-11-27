@@ -7,14 +7,17 @@ name: migrate database
 #   PRODUCTION_DATABASE_URL  Direct/unpooled connection string
 #                            (Neon: DATABASE_URL_UNPOOLED;
 #                             Supabase: "Session pooler" string, port 5432)
-# Optional secrets, only needed when running with "seed" checked:
-#   PGSSEED_ADMIN_PASSWORD, PGSSEED_ENGINEER_PASSWORD
+# Seeding uses the initial passwords hardcoded in config/seeding.php.
 
 on:
   workflow_dispatch:
     inputs:
       seed:
-        description: 'Also run the early-access seeder (Pgsseeder)'
+        description: 'Also seed admin, banks, engineers, ATMs and calls (DatabaseSeeder)'
+        type: boolean
+        default: false
+      reset:
+        description: 'DANGER: allow the seeder to wipe existing job cards, calls and ATMs'
         type: boolean
         default: false
   push:
@@ -64,9 +67,8 @@ jobs:
       - name: Run migrations
         run: php artisan migrate --force
 
-      - name: Seed early-access data
+      - name: Seed application data
         if: github.event_name == 'workflow_dispatch' && inputs.seed
         env:
-          PGSSEED_ADMIN_PASSWORD: ${{ secrets.PGSSEED_ADMIN_PASSWORD }}
-          PGSSEED_ENGINEER_PASSWORD: ${{ secrets.PGSSEED_ENGINEER_PASSWORD }}
-        run: php artisan db:seed --class=Pgsseeder --force
+          SEED_ALLOW_RESET: ${{ inputs.reset }}
+        run: php artisan db:seed --force
