@@ -96,9 +96,19 @@ class EngineerController extends Controller
     public function destroy(Engineer $engineer)
     {
         DB::transaction(function () use ($engineer) {
-            if ($engineer->user_id) {
-                User::find($engineer->user_id)?->delete();
+            $user = User::find($engineer->user_id);
+
+            if ($user) {
+                $user->tokens()->delete();
+
+                DB::table('calls')->where('assigned_by', $user->id)->update(['assigned_by' => null]);
+                DB::table('job_cards')->where('reviewed_by', $user->id)->update(['reviewed_by' => null]);
+
+                $engineer->user()->dissociate();
+                $engineer->save();
+                $user->delete();
             }
+
             $engineer->delete();
         });
 
