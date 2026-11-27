@@ -1,0 +1,72 @@
+name: migrate database
+
+# Runs Laravel migrations against the hosted PostgreSQL database (Neon or
+# Supabase) used by the Vercel deployment.
+#
+# Required repository secret (Settings → Secrets and variables → Actions):
+#   PRODUCTION_DATABASE_URL  Direct/unpooled connection string
+#                            (Neon: DATABASE_URL_UNPOOLED;
+#                             Supabase: "Session pooler" string, port 5432)
+# Optional secrets, only needed when running with "seed" checked:
+#   PGSSEED_ADMIN_PASSWORD, PGSSEED_ENGINEER_PASSWORD
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: 'Also run the early-access seeder (Pgsseeder)'
+        type: boolean
+        default: false
+  push:
+    branches:
+      - main
+    paths:
+      - 'database/migrations/**'
+
+concurrency:
+  group: migrate-production
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    env:
+      APP_ENV: production
+      APP_DEBUG: 'false'
+      DB_CONNECTION: pgsql
+      DB_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+      DB_SSLMODE: require
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      LOG_CHANNEL: stderr
+
+    steps:
+      - name: Check secret
+        if: env.DB_URL == ''
+        run: |
+          echo "::error::Add the PRODUCTION_DATABASE_URL repository secret first."
+          exit 1
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_pgsql, pgsql
+          tools: composer:v2
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
+
+      - name: Run migrations
+        run: php artisan migrate --force
+
+      - name: Seed early-access data
+        if: github.event_name == 'workflow_dispatch' && inputs.seed
+        env:
+          PGSSEED_ADMIN_PASSWORD: ${{ secrets.PGSSEED_ADMIN_PASSWORD }}
+          PGSSEED_ENGINEER_PASSWORD: ${{ secrets.PGSSEED_ENGINEER_PASSWORD }}
+        run: php artisan db:seed --class=Pgsseeder --force

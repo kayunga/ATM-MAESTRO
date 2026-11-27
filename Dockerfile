@@ -1,7 +1,7 @@
 FROM dunglas/frankenphp:1-php8.3-bookworm AS base
 
 RUN cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini" \
-    && install-php-extensions pdo_pgsql pgsql mbstring xml zip
+    && install-php-extensions opcache pdo_pgsql pgsql mbstring xml zip
 
 WORKDIR /app
 
@@ -37,8 +37,11 @@ FROM base AS runtime
 
 COPY --from=build --chown=www-data:www-data /app /app
 COPY --chown=www-data:www-data Caddyfile /etc/frankenphp/Caddyfile
+COPY docker/start-container.sh /usr/local/bin/start-container
 
-RUN setcap CAP_NET_BIND_SERVICE=+eip /usr/local/bin/frankenphp \
+RUN sed -i 's/\r$//' /usr/local/bin/start-container \
+    && chmod 0755 /usr/local/bin/start-container \
+    && setcap CAP_NET_BIND_SERVICE=+eip /usr/local/bin/frankenphp \
     && chown -R www-data:www-data /config/caddy /data/caddy
 
 ENV PORT=80 \
@@ -52,4 +55,4 @@ ENV PORT=80 \
 
 USER www-data
 
-CMD ["frankenphp", "run", "--config", "/etc/frankenphp/Caddyfile"]
+CMD ["/usr/local/bin/start-container"]

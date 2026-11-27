@@ -39,10 +39,14 @@ return [
             ]) : [],
         ],
 
-        // ── Primary connection — Supabase PostgreSQL ──────────────────────────
+        // ── Primary PostgreSQL connection ─────────────────────────────────────
+        // The URL is taken from the first variable that is set, so the Neon
+        // and Supabase Vercel integrations work without copying secrets:
+        //   DB_URL (manual) → DATABASE_URL (Neon) → POSTGRES_URL (Supabase /
+        //   Neon) → DB_POSTGRES_URL (Neon with a "DB" custom prefix).
         'pgsql' => [
             'driver'         => 'pgsql',
-            'url'            => env('DB_URL'),
+            'url'            => env('DB_URL', env('DATABASE_URL', env('POSTGRES_URL', env('DB_POSTGRES_URL')))),
             'host'           => env('DB_HOST', '127.0.0.1'),
             'port'           => env('DB_PORT', '5432'),
             'database'       => env('DB_DATABASE', 'postgres'),
@@ -53,6 +57,12 @@ return [
             'prefix_indexes' => true,
             'search_path'    => 'public',
             'sslmode'        => env('DB_SSLMODE', 'require'),
+            // Set DB_EMULATE_PREPARES=true behind a transaction-mode pooler
+            // that rejects server-side prepared statements (e.g. Supabase's
+            // pooler on port 6543).
+            'options'        => extension_loaded('pdo_pgsql') ? [
+                PDO::ATTR_EMULATE_PREPARES => (bool) env('DB_EMULATE_PREPARES', false),
+            ] : [],
         ],
 
         'sqlsrv' => [
