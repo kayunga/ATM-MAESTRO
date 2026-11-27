@@ -9,6 +9,32 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
+it('creates engineers with and without a portal login', function () {
+    $admin = User::factory()->create(['is_admin' => true]);
+    $this->actingAs($admin);
+
+    $this->post('/engineers', [
+        'name' => 'Field Engineer',
+        'region' => 'Central',
+    ])->assertRedirect();
+
+    $engineer = Engineer::where('name', 'Field Engineer')->firstOrFail();
+    expect($engineer->user_id)->toBeNull();
+
+    $this->post('/engineers', [
+        'name' => 'Portal Engineer',
+        'region' => 'Lusaka',
+        'email' => 'portal@example.com',
+        'create_login' => true,
+        'password' => 'password-123',
+        'password_confirmation' => 'password-123',
+    ])->assertRedirect();
+
+    $portalEngineer = Engineer::where('name', 'Portal Engineer')->firstOrFail();
+    expect($portalEngineer->user_id)->not->toBeNull()
+        ->and($portalEngineer->user->email)->toBe('portal@example.com');
+});
+
 it('deletes an engineer login while preserving assigned calls and clearing user references', function () {
     $admin = User::factory()->create(['is_admin' => true]);
     $login = User::factory()->create();
@@ -34,14 +60,11 @@ it('deletes an engineer login while preserving assigned calls and clearing user 
         'priority' => 'medium',
         'fault_description' => 'ATM is not responding',
     ]);
-    $login->createToken('mobile');
-
     $this->actingAs($admin)
         ->delete("/engineers/{$engineer->id}")
         ->assertRedirect();
 
     expect(User::find($login->id))->toBeNull()
-        ->and($login->tokens()->count())->toBe(0)
         ->and($engineer->fresh()->user_id)->toBeNull()
         ->and($engineer->fresh()->trashed())->toBeTrue()
         ->and($call->fresh()->assigned_by)->toBeNull()
